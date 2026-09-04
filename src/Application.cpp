@@ -160,8 +160,8 @@ Application::Application(int& argc, char** argv) :
     // See https://bugreports.qt.io/browse/QTBUG-40332
     qputenv("QT_BEARER_POLL_TIMEOUT", QByteArray::number(INT_MAX));
 
-    // Remember default font size
-    Settings::rememberDefaultFontSize(font().pointSize());
+    // Remember the desktop default font before applying user settings
+    Settings::rememberDefaultFont(font());
 
     // Parse command line
     QString fileToOpen;
@@ -383,6 +383,7 @@ void Application::reloadSettings()
 
     // Font settings
     QFont f = font();
+    f.setFamily(Settings::getValue("General", "font").toString());
     f.setPointSize(Settings::getValue("General", "fontsize").toInt());
     setFont(f);
 }

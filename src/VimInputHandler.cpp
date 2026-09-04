@@ -101,6 +101,13 @@ bool VimInputHandler::handleKeyPress(QKeyEvent* event)
         return true;
     }
 
+    if(m_mode == Mode::Insert && event->key() == Qt::Key_W &&
+        event->modifiers().testFlag(Qt::ControlModifier))
+    {
+        m_editor->SendScintilla(QsciScintillaBase::SCI_DELWORDLEFT);
+        return true;
+    }
+
     if(m_mode == Mode::Insert)
         return false;
 

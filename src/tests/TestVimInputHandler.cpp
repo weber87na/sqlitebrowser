@@ -32,6 +32,21 @@ void TestVimInputHandler::insertAndEscape()
     QVERIFY(handler.mode() == VimInputHandler::Mode::Normal);
 }
 
+void TestVimInputHandler::insertCtrlWDeletesPreviousWord()
+{
+    QsciScintilla editor;
+    VimInputHandler handler(&editor);
+    prepareEditor(editor);
+    handler.setEnabled(true);
+
+    QTest::keyClick(&editor, Qt::Key_I);
+    QTest::keyClicks(&editor, "select customer");
+    QTest::keyClick(&editor, Qt::Key_W, Qt::ControlModifier);
+
+    QCOMPARE(editor.text(), QString("select "));
+    QVERIFY(handler.mode() == VimInputHandler::Mode::Insert);
+}
+
 void TestVimInputHandler::normalMotionsAndDelete()
 {
     QsciScintilla editor;

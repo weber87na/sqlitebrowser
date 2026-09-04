@@ -9,6 +9,7 @@ class TestVimInputHandler : public QObject
 
 private slots:
     void insertAndEscape();
+    void insertCtrlWDeletesPreviousWord();
     void normalMotionsAndDelete();
     void countedLineDelete();
     void visualDelete();

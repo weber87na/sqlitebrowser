@@ -8,6 +8,7 @@
 
 #include <QDir>
 #include <QColorDialog>
+#include <QFont>
 #include <QMessageBox>
 #include <QKeyEvent>
 #include <QStandardPaths>
@@ -184,6 +185,7 @@ void PreferencesDialog::loadSettings()
     ui->toolbarStyleComboBrowse->setCurrentIndex(Settings::getValue("General", "toolbarStyleBrowse").toInt());
     ui->toolbarStyleComboSql->setCurrentIndex(Settings::getValue("General", "toolbarStyleSql").toInt());
     ui->toolbarStyleComboEditCell->setCurrentIndex(Settings::getValue("General", "toolbarStyleEditCell").toInt());
+    ui->comboGeneralFont->setCurrentFont(QFont(Settings::getValue("General", "font").toString()));
     ui->spinGeneralFontSize->setValue(Settings::getValue("General", "fontsize").toInt());
     ui->spinMaxRecentFiles->setValue(Settings::getValue("General", "maxRecentFiles").toInt());
 }
@@ -273,6 +275,7 @@ void PreferencesDialog::saveSettings(bool accept)
     Settings::setValue("General", "toolbarStyleSql", ui->toolbarStyleComboSql->currentIndex());
     Settings::setValue("General", "toolbarStyleEditCell", ui->toolbarStyleComboEditCell->currentIndex());
     Settings::setValue("General", "DBFileExtensions", m_dbFileExtensions.join(";;") );
+    Settings::setValue("General", "font", ui->comboGeneralFont->currentFont().family());
     Settings::setValue("General", "fontsize", ui->spinGeneralFontSize->value());
     Settings::setValue("General", "maxRecentFiles", ui->spinMaxRecentFiles->value());
     Settings::setValue("General", "recentfileshortcuts", ui->checkRecentFileShortcuts->isChecked());

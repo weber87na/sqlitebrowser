@@ -269,6 +269,7 @@ target_sources(${PROJECT_NAME}
     # Styles
     src/qdarkstyle/dark/darkstyle.qrc
     src/qdarkstyle/light/lightstyle.qrc
+    src/dracula/dracula.qrc
 )
 
 target_link_libraries(${PROJECT_NAME}

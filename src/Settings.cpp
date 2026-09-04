@@ -14,6 +14,7 @@ QString Settings::userSettingsFile;
 QSettings* Settings::settings;
 std::unordered_map<std::string, QVariant> Settings::m_hCache;
 int Settings::m_defaultFontSize;
+QString Settings::m_defaultFontFamily;
 
 static bool ends_with(const std::string& str, const std::string& with)
 {
@@ -282,6 +283,10 @@ QVariant Settings::getDefaultValue(const std::string& group, const std::string& 
     if(group == "General" && name == "fontsize")
         return m_defaultFontSize;
 
+    // General/font
+    if(group == "General" && name == "font")
+        return m_defaultFontFamily.isEmpty() ? QApplication::font().family() : m_defaultFontFamily;
+
     // General/promptsqltabsinnewproject
     if(group == "General" && name == "promptsqltabsinnewproject")
         return true;
@@ -533,6 +538,18 @@ QColor Settings::getDefaultColorValue(const std::string& group, const std::strin
             if(name == "formatted_bg_colour")
                 return QColor(0xFA, 0xFA, 0xFA);
             break;
+        case DraculaStyle :
+            if(name == "null_fg_colour" || name == "bin_fg_colour")
+                return QColor(0x62, 0x72, 0xA4);
+            if(name == "null_bg_colour" || name == "bin_bg_colour")
+                return QColor(0x28, 0x2A, 0x36);
+            if(name == "reg_fg_colour" || name == "formatted_fg_colour")
+                return QColor(0xF8, 0xF8, 0xF2);
+            if(name == "reg_bg_colour")
+                return QColor(0x28, 0x2A, 0x36);
+            if(name == "formatted_bg_colour")
+                return QColor(0x44, 0x47, 0x5A);
+            break;
         }
     }
 
@@ -558,15 +575,42 @@ QColor Settings::getDefaultColorValue(const std::string& group, const std::strin
                 foregroundColour = QColor(0x00, 0x00, 0x00);
                 backgroundColour = QColor(0xFA, 0xFA, 0xFA);
                 break;
+            case DraculaStyle :
+                foregroundColour = QColor(0xF8, 0xF8, 0xF2);
+                backgroundColour = QColor(0x28, 0x2A, 0x36);
+                break;
             }
             if(name == "foreground_colour")
                 return foregroundColour;
             else if(name == "background_colour")
                 return backgroundColour;
+            else if(style == DraculaStyle && name == "selected_fg_colour")
+                return QColor(0xF8, 0xF8, 0xF2);
+            else if(style == DraculaStyle && name == "selected_bg_colour")
+                return QColor(0x44, 0x47, 0x5A);
             else if(name == "selected_fg_colour")
                 return QPalette().color(QPalette::Active, QPalette::HighlightedText);
             else if(name == "selected_bg_colour")
                 return QPalette().color(QPalette::Active, QPalette::Highlight);
+
+            if(style == DraculaStyle) {
+                if(name == "keyword_colour")
+                    return QColor(0xFF, 0x79, 0xC6);
+                else if(name == "function_colour")
+                    return QColor(0x50, 0xFA, 0x7B);
+                else if(name == "table_colour")
+                    return QColor(0x8B, 0xE9, 0xFD);
+                else if(name == "comment_colour")
+                    return QColor(0x62, 0x72, 0xA4);
+                else if(name == "identifier_colour")
+                    return QColor(0xBD, 0x93, 0xF9);
+                else if(name == "string_colour")
+                    return QColor(0xF1, 0xFA, 0x8C);
+                else if(name == "currentline_colour")
+                    return QColor(0x44, 0x47, 0x5A);
+                else if(name == "highlight_colour")
+                    return QColor(0xBD, 0x93, 0xF9);
+            }
 
             // Detect and provide sensible defaults for dark themes
             if (backgroundColour.value() < foregroundColour.value()) {
