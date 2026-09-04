@@ -97,7 +97,4 @@ set(TESTVIMINPUT_HDR
 add_executable(test-vim-input ${TESTVIMINPUT_HDR} ${TESTVIMINPUT_SRC})
 target_link_libraries(test-vim-input ${QT_MAJOR}::Test ${QT_MAJOR}::Widgets QScintilla::QScintilla)
 add_test(NAME test-vim-input COMMAND $<TARGET_FILE:test-vim-input>)
-
-if(UNIX AND NOT APPLE)
-    set_tests_properties(test-vim-input PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
-endif()
+set_tests_properties(test-vim-input PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

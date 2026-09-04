@@ -13,9 +13,6 @@ namespace
 void prepareEditor(QsciScintilla& editor)
 {
     editor.resize(640, 320);
-    editor.show();
-    editor.activateWindow();
-    editor.setFocus();
     QCoreApplication::processEvents();
 }
 }
