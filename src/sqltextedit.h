@@ -4,6 +4,9 @@
 #include "ExtendedScintilla.h"
 
 class SqlUiLexer;
+class VimInputHandler;
+class QLabel;
+class QResizeEvent;
 
 /**
  * @brief The SqlTextEdit class
@@ -21,6 +24,16 @@ public:
 public slots:
     void reloadSettings();
     void toggleBlockComment();
+
+protected:
+    void resizeEvent(QResizeEvent* event) override;
+
+private slots:
+    void updateVimModeIndicator();
+
+private:
+    VimInputHandler* m_vimInputHandler;
+    QLabel* m_vimModeIndicator;
 
 };
 

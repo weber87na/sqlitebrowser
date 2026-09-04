@@ -418,6 +418,10 @@ QVariant Settings::getDefaultValue(const std::string& group, const std::string& 
     if(group == "editor" && name == "close_button_on_tabs")
         return true;
 
+    // editor/vim_mode?
+    if(group == "editor" && name == "vim_mode")
+        return false;
+
     // extensions/list?
     if(group == "extensions" && name == "list")
         return QStringList();

@@ -17,6 +17,7 @@
 - [DB Browser for SQLite](#db-browser-for-sqlite)
   - [Table of Contents](#table-of-contents)
   - [What it is](#what-it-is)
+  - [Vim editing mode](#vim-editing-mode)
   - [What it is not](#what-it-is-not)
   - [Wiki](#wiki)
   - [Continuous, Nightly builds](#continuous-nightly-builds)
@@ -70,6 +71,25 @@ Controls and wizards are available for users to:
 * Issue SQL queries and inspect the results
 * Examine a log of all SQL commands issued by the application
 * Plot simple graphs based on table or query data
+
+## Vim editing mode
+
+Vim-style modal editing can be enabled in **Edit > Preferences > SQL > Vim
+editing mode**. It works in SQL editors on every supported platform, including
+Windows, and is disabled by default.
+
+The editor shows the active mode in its lower-right corner. Supported commands
+include:
+
+* Modes: `i`, `I`, `a`, `A`, `o`, `O`, `Esc`, `v`, and `V`
+* Motions: `h`, `j`, `k`, `l`, `w`, `b`, `e`, `0`, `^`, `$`, `gg`, `G`, and `%`
+* Editing: `x`, `s`, `d`, `c`, `y`, `r`, `p`, `P`, `J`, `~`, `u`, and `Ctrl+R`
+* Searching: `/`, `?`, `n`, and `N`
+* Counts and common combinations such as `3w`, `2dd`, `dw`, `d$`, `yy`, and
+  visual-mode `d`, `c`, or `y`
+
+Yanks and deletes use the system clipboard, so text can be copied to and from
+other Windows applications.
 
 ## What it is not
 
