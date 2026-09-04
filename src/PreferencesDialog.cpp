@@ -153,12 +153,17 @@ void PreferencesDialog::loadSettings()
     // Gracefully handle the preferred Editor font not being available
     matchingFont = ui->comboEditorFont->findText(Settings::getValue("editor", "font").toString(), Qt::MatchExactly);
     if (matchingFont == -1)
-        matchingFont = ui->comboDataBrowserFont->findText(Settings::getDefaultValue("editor", "font").toString());
+        matchingFont = ui->comboEditorFont->findText(Settings::getDefaultValue("editor", "font").toString());
     ui->comboEditorFont->setCurrentIndex(matchingFont);
 
     ui->spinEditorFontSize->setValue(Settings::getValue("editor", "fontsize").toInt());
     ui->spinTabSize->setValue(Settings::getValue("editor", "tabsize").toInt());
     ui->checkIndentationUseTabs->setChecked(Settings::getValue("editor", "indentation_use_tabs").toBool());
+
+    matchingFont = ui->comboLogFont->findText(Settings::getValue("log", "font").toString(), Qt::MatchExactly);
+    if (matchingFont == -1)
+        matchingFont = ui->comboLogFont->findText(Settings::getDefaultValue("log", "font").toString());
+    ui->comboLogFont->setCurrentIndex(matchingFont);
     ui->spinLogFontSize->setValue(Settings::getValue("log", "fontsize").toInt());
     ui->wrapComboBox->setCurrentIndex(Settings::getValue("editor", "wrap_lines").toInt());
     ui->quoteComboBox->setCurrentIndex(Settings::getValue("editor", "identifier_quotes").toInt());
@@ -239,6 +244,7 @@ void PreferencesDialog::saveSettings(bool accept)
     Settings::setValue("editor", "fontsize", ui->spinEditorFontSize->value());
     Settings::setValue("editor", "tabsize", ui->spinTabSize->value());
     Settings::setValue("editor", "indentation_use_tabs", ui->checkIndentationUseTabs->isChecked());
+    Settings::setValue("log", "font", ui->comboLogFont->currentText());
     Settings::setValue("log", "fontsize", ui->spinLogFontSize->value());
     Settings::setValue("editor", "wrap_lines", ui->wrapComboBox->currentIndex());
     Settings::setValue("editor", "identifier_quotes", ui->quoteComboBox->currentIndex());

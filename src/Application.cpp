@@ -107,6 +107,40 @@ Application::Application(int& argc, char** argv) :
     setOrganizationName("sqlitebrowser");
     setApplicationName("DB Browser for SQLite");
 
+    // Existing installations keep their QSettings when a portable build is
+    // replaced. Apply the requested Vim/Dracula defaults once, then leave all
+    // later user changes untouched.
+    if(!Settings::getValue("General", "vimDraculaDefaultsApplied").toBool())
+    {
+        Settings::setValue("General", "appStyle", static_cast<int>(Settings::DraculaStyle));
+        Settings::setValue("General", "font", QStringLiteral("Consolas"));
+        Settings::setValue("databrowser", "font", QStringLiteral("Consolas"));
+        Settings::setValue("editor", "font", QStringLiteral("Consolas"));
+        Settings::setValue("log", "font", QStringLiteral("Consolas"));
+
+        const QStringList dataBrowserColours = {
+            QStringLiteral("null_fg_colour"), QStringLiteral("null_bg_colour"),
+            QStringLiteral("reg_fg_colour"), QStringLiteral("reg_bg_colour"),
+            QStringLiteral("formatted_fg_colour"), QStringLiteral("formatted_bg_colour"),
+            QStringLiteral("bin_fg_colour"), QStringLiteral("bin_bg_colour")
+        };
+        for(const QString& name : dataBrowserColours)
+            Settings::clearValue("databrowser", name.toStdString());
+
+        const QStringList syntaxColours = {
+            QStringLiteral("keyword_colour"), QStringLiteral("function_colour"),
+            QStringLiteral("table_colour"), QStringLiteral("comment_colour"),
+            QStringLiteral("identifier_colour"), QStringLiteral("string_colour"),
+            QStringLiteral("currentline_colour"), QStringLiteral("background_colour"),
+            QStringLiteral("foreground_colour"), QStringLiteral("selected_bg_colour"),
+            QStringLiteral("selected_fg_colour"), QStringLiteral("highlight_colour")
+        };
+        for(const QString& name : syntaxColours)
+            Settings::clearValue("syntaxhighlighter", name.toStdString());
+
+        Settings::setValue("General", "vimDraculaDefaultsApplied", true);
+    }
+
     // Set character encoding to UTF8
     QTextCodec::setCodecForLocale(QTextCodec::codecForName("UTF-8"));
 

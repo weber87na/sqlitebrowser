@@ -2451,7 +2451,7 @@ void MainWindow::reloadSettings()
         qobject_cast<SqlExecutionArea*>(ui->tabSqlAreas->widget(i))->reloadSettings();
 
     // Prepare log font
-    QFont logfont("Monospace");
+    QFont logfont(Settings::getValue("log", "font").toString());
     logfont.setStyleHint(QFont::TypeWriter);
     logfont.setPointSize(Settings::getValue("log", "fontsize").toInt());
 

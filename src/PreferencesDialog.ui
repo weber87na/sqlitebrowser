@@ -1667,22 +1667,39 @@ Can be set to 0 for disabling completion.</string>
          <item row="1" column="0">
           <widget class="QLabel" name="label_7">
            <property name="text">
-            <string>SQL &amp;results font size</string>
+            <string>SQL &amp;results font</string>
            </property>
            <property name="buddy">
-            <cstring>spinLogFontSize</cstring>
+            <cstring>comboLogFont</cstring>
            </property>
           </widget>
          </item>
          <item row="1" column="1">
-          <widget class="QSpinBox" name="spinLogFontSize">
-           <property name="correctionMode">
-            <enum>QAbstractSpinBox::CorrectToNearestValue</enum>
-           </property>
-           <property name="minimum">
-            <number>1</number>
-           </property>
-          </widget>
+          <layout class="QHBoxLayout" name="horizontalLayoutLogFont">
+           <item>
+            <widget class="QFontComboBox" name="comboLogFont"/>
+           </item>
+           <item>
+            <widget class="QLabel" name="labelLogFontSize">
+             <property name="text">
+              <string>Size</string>
+             </property>
+             <property name="buddy">
+              <cstring>spinLogFontSize</cstring>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QSpinBox" name="spinLogFontSize">
+             <property name="correctionMode">
+              <enum>QAbstractSpinBox::CorrectToNearestValue</enum>
+             </property>
+             <property name="minimum">
+              <number>1</number>
+             </property>
+            </widget>
+           </item>
+          </layout>
          </item>
          <item row="2" column="0">
           <widget class="QLabel" name="label_13">
@@ -2113,6 +2130,7 @@ Can be set to 0 for disabling completion.</string>
   <tabstop>treeSyntaxHighlighting</tabstop>
   <tabstop>comboEditorFont</tabstop>
   <tabstop>spinEditorFontSize</tabstop>
+  <tabstop>comboLogFont</tabstop>
   <tabstop>spinLogFontSize</tabstop>
   <tabstop>spinTabSize</tabstop>
   <tabstop>checkIndentationUseTabs</tabstop>

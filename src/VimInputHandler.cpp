@@ -3,12 +3,16 @@
 #include <Qsci/qsciscintilla.h>
 
 #include <QApplication>
+#include <QAction>
 #include <QClipboard>
 #include <QInputDialog>
 #include <QKeyEvent>
 #include <QLineEdit>
+#include <QStringList>
+#include <QTimer>
 
 #include <algorithm>
+#include <cctype>
 
 namespace
 {
@@ -38,10 +42,14 @@ VimInputHandler::VimInputHandler(QsciScintilla* editor, QObject* parent) :
     m_visualAnchor(0),
     m_visualCaret(0),
     m_registerLinewise(false),
-    m_lastSearchForward(true)
+    m_lastSearchForward(true),
+    m_mappingTimer(new QTimer(this))
 {
     Q_ASSERT(m_editor);
     m_editor->installEventFilter(this);
+    m_mappingTimer->setSingleShot(true);
+    m_mappingTimer->setInterval(700);
+    connect(m_mappingTimer, &QTimer::timeout, this, &VimInputHandler::flushInsertMappingPrefix);
 }
 
 VimInputHandler::~VimInputHandler()
@@ -57,6 +65,8 @@ void VimInputHandler::setEnabled(bool enabled)
 
     m_enabled = enabled;
     resetPendingCommand();
+    m_mappingPrefix.clear();
+    m_mappingTimer->stop();
     setMode(enabled ? Mode::Normal : Mode::Insert);
     if(!enabled)
         m_editor->SendScintilla(QsciScintillaBase::SCI_SETEMPTYSELECTION, currentPosition());
@@ -88,6 +98,11 @@ bool VimInputHandler::handleKeyPress(QKeyEvent* event)
     if(escape)
     {
         if(m_mode == Mode::Insert)
+            flushInsertMappingPrefix();
+        else
+            m_mappingPrefix.clear();
+
+        if(m_mode == Mode::Insert)
         {
             setMode(Mode::Normal);
             clampNormalCaret();
@@ -108,6 +123,9 @@ bool VimInputHandler::handleKeyPress(QKeyEvent* event)
         return true;
     }
 
+    if(handleCustomMapping(event))
+        return true;
+
     if(m_mode == Mode::Insert)
         return false;
 
@@ -121,6 +139,183 @@ bool VimInputHandler::handleKeyPress(QKeyEvent* event)
         return handleVisualKey(event);
 
     return handleNormalKey(event);
+}
+
+bool VimInputHandler::handleCustomMapping(QKeyEvent* event)
+{
+    if(event->modifiers().testFlag(Qt::ControlModifier) ||
+       event->modifiers().testFlag(Qt::AltModifier) ||
+       event->modifiers().testFlag(Qt::MetaModifier))
+        return false;
+
+    const QString key = commandKey(event);
+    if(key.isEmpty())
+        return false;
+
+    const QString candidate = m_mappingPrefix + key;
+    if(executeCustomMapping(candidate))
+    {
+        m_mappingPrefix.clear();
+        m_mappingTimer->stop();
+        return true;
+    }
+
+    if(isCustomMappingPrefix(candidate))
+    {
+        m_mappingPrefix = candidate;
+        if(m_mode == Mode::Insert)
+            m_mappingTimer->start();
+        return true;
+    }
+
+    if(m_mappingPrefix.isEmpty())
+        return false;
+
+    if(m_mode == Mode::Insert)
+        flushInsertMappingPrefix();
+    else
+        m_mappingPrefix.clear();
+
+    // The key which failed to complete a mapping may itself start one.
+    if(isCustomMappingPrefix(key))
+    {
+        m_mappingPrefix = key;
+        if(m_mode == Mode::Insert)
+            m_mappingTimer->start();
+        return true;
+    }
+
+    return false;
+}
+
+bool VimInputHandler::isCustomMappingPrefix(const QString& mapping) const
+{
+    QStringList mappings;
+    if(m_mode == Mode::Insert)
+        mappings = {",,", "z;", "zh", "zl", "z,"};
+    else if(m_mode == Mode::Normal)
+        mappings = {",,", ",ss", ",ci", ",xs", "zh", "zl", "z;", "z,"};
+    else
+        mappings = {",,", ",aa", ",ci", ",ss"};
+
+    for(const QString& candidate : mappings)
+    {
+        if(candidate.startsWith(mapping) && candidate != mapping)
+            return true;
+    }
+    return false;
+}
+
+bool VimInputHandler::executeCustomMapping(const QString& mapping)
+{
+    if(m_mode == Mode::Insert)
+    {
+        if(mapping == ",,")
+        {
+            setMode(Mode::Normal);
+            clampNormalCaret();
+            return true;
+        }
+        if(mapping == "zh")
+        {
+            move("^", 1);
+            return true;
+        }
+        if(mapping == "zl")
+        {
+            setPosition(lineEndPosition(currentLine()));
+            return true;
+        }
+        if(mapping == "z;" || mapping == "z,")
+        {
+            setPosition(lineEndPosition(currentLine()));
+            m_editor->replaceSelectedText(mapping.right(1));
+            return true;
+        }
+        return false;
+    }
+
+    if(mapping == ",,")
+    {
+        if(m_mode == Mode::Visual || m_mode == Mode::VisualLine)
+            setPosition(m_visualCaret);
+        setMode(Mode::Normal);
+        resetPendingCommand();
+        return true;
+    }
+
+    if(m_mode == Mode::Normal)
+    {
+        if(mapping == "zh" || mapping == "zl")
+            return move(mapping == "zh" ? "^" : "$", 1);
+
+        if(mapping == "z;" || mapping == "z,")
+        {
+            if(m_editor->isReadOnly())
+                return true;
+            setPosition(lineEndPosition(currentLine()));
+            m_editor->replaceSelectedText(mapping.right(1));
+            setMode(Mode::Normal);
+            clampNormalCaret();
+            return true;
+        }
+
+        if(mapping == ",ss")
+        {
+            promptSearch(true);
+            return true;
+        }
+
+        if(mapping == ",ci")
+        {
+            QMetaObject::invokeMethod(m_editor, "toggleBlockComment", Qt::DirectConnection);
+            clampNormalCaret();
+            return true;
+        }
+
+        if(mapping == ",xs")
+        {
+            if(QWidget* window = m_editor->window())
+            {
+                if(QAction* saveAction = window->findChild<QAction*>(QStringLiteral("actionSqlSaveFile")))
+                    saveAction->trigger();
+            }
+            return true;
+        }
+
+        return false;
+    }
+
+    if(mapping == ",aa")
+    {
+        finishVisualOperator("y");
+        return true;
+    }
+    if(mapping == ",ss")
+    {
+        setPosition(m_visualCaret);
+        setMode(Mode::Normal);
+        promptSearch(true);
+        return true;
+    }
+    if(mapping == ",ci")
+    {
+        QMetaObject::invokeMethod(m_editor, "toggleBlockComment", Qt::DirectConnection);
+        setPosition(m_visualCaret);
+        setMode(Mode::Normal);
+        clampNormalCaret();
+        return true;
+    }
+
+    return false;
+}
+
+void VimInputHandler::flushInsertMappingPrefix()
+{
+    m_mappingTimer->stop();
+    if(m_mode == Mode::Insert && !m_mappingPrefix.isEmpty() && !m_editor->isReadOnly())
+        m_editor->replaceSelectedText(m_mappingPrefix);
+    m_mappingPrefix.clear();
 }
 
 bool VimInputHandler::handleControlKey(QKeyEvent* event)
@@ -461,6 +656,54 @@ int VimInputHandler::positionBefore(int position) const
     return static_cast<int>(m_editor->SendScintilla(QsciScintillaBase::SCI_POSITIONBEFORE, position));
 }
 
+int VimInputHandler::characterClassAt(int position) const
+{
+    if(position < 0 || position >= documentLength())
+        return 0;
+
+    const unsigned char character = static_cast<unsigned char>(
+        m_editor->SendScintilla(QsciScintillaBase::SCI_GETCHARAT, position));
+    if(character == 0 || std::isspace(character))
+        return 0;
+    if(character >= 0x80 || std::isalnum(character) || character == '_')
+        return 1;
+    return 2;
+}
+
+int VimInputHandler::nextWordEndPosition(int position) const
+{
+    if(documentLength() == 0)
+        return 0;
+
+    int cursor = std::max(0, std::min(documentLength() - 1, position));
+
+    // Vim's e always advances before looking for an end. This is important
+    // when the caret is already on the final character of a word.
+    if(cursor < documentLength() - 1)
+        cursor = positionAfter(cursor);
+
+    while(cursor < documentLength() && characterClassAt(cursor) == 0)
+    {
+        const int next = positionAfter(cursor);
+        if(next <= cursor)
+            break;
+        cursor = next;
+    }
+
+    if(cursor >= documentLength())
+        return std::max(0, positionBefore(documentLength()));
+
+    const int characterClass = characterClassAt(cursor);
+    while(cursor < documentLength() - 1)
+    {
+        const int next = positionAfter(cursor);
+        if(next <= cursor || characterClassAt(next) != characterClass)
+            break;
+        cursor = next;
+    }
+    return cursor;
+}
+
 void VimInputHandler::setPosition(int position)
 {
     const int safePosition = std::max(0, std::min(documentLength(), position));
@@ -530,15 +773,18 @@ bool VimInputHandler::move(const QString& command, int count)
     }
     else if(command == "w" || command == "b" || command == "e")
     {
-        int message = QsciScintillaBase::SCI_WORDRIGHT;
-        if(command == "b")
-            message = QsciScintillaBase::SCI_WORDLEFT;
-        else if(command == "e")
-            message = QsciScintillaBase::SCI_WORDRIGHTEND;
-        for(int i = 0; i < count; ++i)
-            m_editor->SendScintilla(message);
-        if(command == "e" && currentPosition() > positionFromLine(currentLine()))
-            setPosition(positionBefore(currentPosition()));
+        if(command == "e")
+        {
+            for(int i = 0; i < count; ++i)
+                setPosition(nextWordEndPosition(currentPosition()));
+        }
+        else
+        {
+            const int message = command == "b" ? QsciScintillaBase::SCI_WORDLEFT
+                                                : QsciScintillaBase::SCI_WORDRIGHT;
+            for(int i = 0; i < count; ++i)
+                m_editor->SendScintilla(message);
+        }
         clampNormalCaret();
     }
     else if(command == "G")

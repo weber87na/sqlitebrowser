@@ -62,6 +62,57 @@ void TestVimInputHandler::normalMotionsAndDelete()
     QCOMPARE(editor.text(), QString("one wo"));
 }
 
+void TestVimInputHandler::wordEndMotionIncludesPunctuationAcrossLines()
+{
+    QsciScintilla editor;
+    VimInputHandler handler(&editor);
+    editor.setText("SELECT * \nFROM test;");
+    prepareEditor(editor);
+    editor.setCursorPosition(0, 0);
+    handler.setEnabled(true);
+
+    QTest::keyClick(&editor, Qt::Key_E);
+    QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 5L);
+    QTest::keyClick(&editor, Qt::Key_E);
+    QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 7L);
+    QTest::keyClick(&editor, Qt::Key_E);
+    QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 13L);
+}
+
+void TestVimInputHandler::customInsertMappings()
+{
+    QsciScintilla editor;
+    VimInputHandler handler(&editor);
+    editor.setText("    SELECT");
+    prepareEditor(editor);
+    editor.setCursorPosition(0, 4);
+    handler.setEnabled(true);
+
+    QTest::keyClick(&editor, Qt::Key_I);
+    QTest::keyClicks(&editor, "z;");
+    QCOMPARE(editor.text(), QString("    SELECT;"));
+    QVERIFY(handler.mode() == VimInputHandler::Mode::Insert);
+
+    QTest::keyClicks(&editor, ",,");
+    QVERIFY(handler.mode() == VimInputHandler::Mode::Normal);
+}
+
+void TestVimInputHandler::customNormalMappings()
+{
+    QsciScintilla editor;
+    VimInputHandler handler(&editor);
+    editor.setText("    SELECT");
+    prepareEditor(editor);
+    editor.setCursorPosition(0, 6);
+    handler.setEnabled(true);
+
+    QTest::keyClicks(&editor, "zh");
+    QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 4L);
+    QTest::keyClicks(&editor, "z,");
+    QCOMPARE(editor.text(), QString("    SELECT,"));
+    QVERIFY(handler.mode() == VimInputHandler::Mode::Normal);
+}
+
 void TestVimInputHandler::countedLineDelete()
 {
     QsciScintilla editor;

@@ -254,7 +254,7 @@ QVariant Settings::getDefaultValue(const std::string& group, const std::string& 
 
     // General/appStyle
     if(group == "General" && name == "appStyle")
-        return static_cast<int>(FollowDesktopStyle);
+        return static_cast<int>(DraculaStyle);
 
     // General/toolbarStyle
     if(group == "General" && name == "toolbarStyle")
@@ -285,7 +285,11 @@ QVariant Settings::getDefaultValue(const std::string& group, const std::string& 
 
     // General/font
     if(group == "General" && name == "font")
-        return m_defaultFontFamily.isEmpty() ? QApplication::font().family() : m_defaultFontFamily;
+        return QStringLiteral("Consolas");
+
+    // One-time defaults migration for this Vim/Dracula build.
+    if(group == "General" && name == "vimDraculaDefaultsApplied")
+        return false;
 
     // General/promptsqltabsinnewproject
     if(group == "General" && name == "promptsqltabsinnewproject")
@@ -306,9 +310,7 @@ QVariant Settings::getDefaultValue(const std::string& group, const std::string& 
     if(group == "databrowser")
     {
         if(name == "font") {
-            QFont font("Monospace");
-            font.setStyleHint(QFont::TypeWriter);
-            return QFontInfo(font).family();
+            return QStringLiteral("Consolas");
         }
         if(name == "fontsize")
             return 10;
@@ -339,7 +341,7 @@ QVariant Settings::getDefaultValue(const std::string& group, const std::string& 
         if(name == "filter_delay")
             return 200;
         if(ends_with(name, "colour"))
-            return getDefaultColorValue(group, name, FollowDesktopStyle);
+            return getDefaultColorValue(group, name, DraculaStyle);
     }
 
     // syntaxhighlighter?
@@ -359,16 +361,17 @@ QVariant Settings::getDefaultValue(const std::string& group, const std::string& 
 
         // Colour?
         if(ends_with(name, "colour"))
-            return getDefaultColorValue(group, name, FollowDesktopStyle);
+            return getDefaultColorValue(group, name, DraculaStyle);
     }
 
     // editor/font?
     if(group == "editor" && name == "font")
-    {
-        QFont font("Monospace");
-        font.setStyleHint(QFont::TypeWriter);
-        return QFontInfo(font).family();
-    }
+        return QStringLiteral("Consolas");
+
+    // SQL execution output and application logs use an independently
+    // configurable monospaced font.
+    if(group == "log" && name == "font")
+        return QStringLiteral("Consolas");
 
     // editor/fontsize or log/fontsize?
     if((group == "editor" || group == "log") && name == "fontsize")

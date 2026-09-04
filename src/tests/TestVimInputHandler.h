@@ -11,6 +11,9 @@ private slots:
     void insertAndEscape();
     void insertCtrlWDeletesPreviousWord();
     void normalMotionsAndDelete();
+    void wordEndMotionIncludesPunctuationAcrossLines();
+    void customInsertMappings();
+    void customNormalMappings();
     void countedLineDelete();
     void visualDelete();
     void yankAndPasteLine();

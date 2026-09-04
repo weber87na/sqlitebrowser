@@ -7,6 +7,7 @@
 class QEvent;
 class QKeyEvent;
 class QsciScintilla;
+class QTimer;
 
 /**
  * @brief Adds a small, self-contained Vim emulation layer to QScintilla.
@@ -49,6 +50,10 @@ private:
     bool handleVisualKey(QKeyEvent* event);
     bool handlePendingKey(QKeyEvent* event);
     bool handleControlKey(QKeyEvent* event);
+    bool handleCustomMapping(QKeyEvent* event);
+    bool executeCustomMapping(const QString& mapping);
+    bool isCustomMappingPrefix(const QString& mapping) const;
+    void flushInsertMappingPrefix();
 
     void setMode(Mode mode);
     void resetPendingCommand();
@@ -60,6 +65,8 @@ private:
     int lineEndPosition(int line) const;
     int positionAfter(int position) const;
     int positionBefore(int position) const;
+    int characterClassAt(int position) const;
+    int nextWordEndPosition(int position) const;
     void setPosition(int position);
     void setSelection(int start, int end);
     void clampNormalCaret();
@@ -97,6 +104,8 @@ private:
     bool m_registerLinewise;
     QString m_lastSearch;
     bool m_lastSearchForward;
+    QString m_mappingPrefix;
+    QTimer* m_mappingTimer;
 };
 
 #endif
