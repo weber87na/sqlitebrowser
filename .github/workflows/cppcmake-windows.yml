@@ -1,8 +1,6 @@
 name: Build (Windows)
 
 on:
-  push:
-    branches: [vim-mode-windows]
   workflow_call:
     inputs:
       NIGHTLY:
