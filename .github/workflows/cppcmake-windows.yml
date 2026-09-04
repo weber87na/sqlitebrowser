@@ -1,8 +1,6 @@
 name: Build (Windows)
 
 on:
-  push:
-    branches: [vim-mode-windows]
   workflow_call:
     inputs:
       NIGHTLY:
@@ -260,10 +258,3 @@ jobs:
           fi
 
   release:
-    if: github.event_name == 'workflow_dispatch' && github.workflow == 'Build (Windows)'
-    needs: build
-    name: Release
-    permissions:
-      actions: read
-      contents: write
-    uses: ./.github/workflows/release.yml
