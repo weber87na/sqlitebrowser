@@ -1,6 +1,8 @@
 name: Build (Windows)
 
 on:
+  push:
+    branches: [vim-mode-windows]
   workflow_call:
     inputs:
       NIGHTLY:
@@ -26,8 +28,6 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       OPENSSL_VERSION: 1.1.1.2100
-      SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
-      SIGNPATH_ORGANIZATION_ID: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -164,8 +164,9 @@ jobs:
           retention-days: 1
 
       # Change the signing-policy-slug when you release an RC, RTM or stable release.
-      - if: github.event_name != 'pull_request' && env.SIGNPATH_API_TOKEN != '' && env.SIGNPATH_ORGANIZATION_ID != ''
+      - if: github.event_name != 'pull_request'
         name: Code signing with SignPath
+        continue-on-error: true
         uses: signpath/github-action-submit-signing-request@v2
         with:
           api-token: "${{ secrets.SIGNPATH_API_TOKEN }}"
