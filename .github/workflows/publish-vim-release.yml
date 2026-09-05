@@ -1,0 +1,36 @@
+name: Publish Vim Dracula Release
+
+on:
+  push:
+    branches: [vim-mode-windows]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[publish-vim-release]')
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: vim-dracula-v2
+      BUILD_RUN_ID: "33937430300"
+    steps:
+      - name: Download portable build artifacts
+        run: |
+          mkdir -p artifacts/x64 artifacts/x86 dist
+          gh run download "$BUILD_RUN_ID" --repo "${{ github.repository }}" --name build-artifacts-win-x64 --dir artifacts/x64
+          gh run download "$BUILD_RUN_ID" --repo "${{ github.repository }}" --name build-artifacts-win-x86 --dir artifacts/x86
+
+      - name: Prepare release assets
+        run: |
+          cp artifacts/x64/DB.Browser.for.SQLite-dev-cd3dead-win-x64.zip dist/DB-Browser-for-SQLite-Vim-Dracula-v2-Windows-x64-portable.zip
+          cp artifacts/x86/DB.Browser.for.SQLite-dev-cd3dead-win-x86.zip dist/DB-Browser-for-SQLite-Vim-Dracula-v2-Windows-x86-portable.zip
+          cd dist
+          sha256sum *.zip > SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        run: |
+          gh release create "$RELEASE_TAG" --repo "${{ github.repository }}" --target vim-mode-windows --title "DB Browser for SQLite Vim + Dracula v2" --prerelease --notes "Windows portable build with Vim mode, Dracula as the default theme, Consolas UI/editor/log fonts, corrected Vim e motion, Ctrl+W word deletion in Insert mode, and custom comma-leader mappings." dist/DB-Browser-for-SQLite-Vim-Dracula-v2-Windows-x64-portable.zip dist/DB-Browser-for-SQLite-Vim-Dracula-v2-Windows-x86-portable.zip dist/SHA256SUMS.txt
