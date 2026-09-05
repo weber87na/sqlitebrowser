@@ -1,37 +1,38 @@
 name: Publish Vim Dracula Release
-
 on:
+  push:
+    branches: [vim-mode-windows]
+    paths: [.github/workflows/publish-vim-release.yml]
   workflow_dispatch:
-
 permissions:
   actions: read
   contents: write
-
 jobs:
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     env:
       GH_TOKEN: ${{ github.token }}
-      RELEASE_TAG: vim-dracula-v2
-      BUILD_RUN_ID: "33937430300"
+      GH_REPO: ${{ github.repository }}
+      BUILD_RUN_ID: "33952153806"
+      BUILD_SHA: "74b4d98610629974ea7c0b97723d91c60d790dad"
+      RELEASE_TAG: vim-dracula-v3
     steps:
-      - name: Download portable build artifacts
+      - name: Require successful build and regression tests
+        run: |
+          gh run watch "$BUILD_RUN_ID" --exit-status --interval 30
+          test "$(gh run view "$BUILD_RUN_ID" --json headSha --jq .headSha)" = "$BUILD_SHA"
+      - name: Download verified build
         run: |
           mkdir -p artifacts/x64 artifacts/x86 dist
-          gh run download "$BUILD_RUN_ID" --repo "${{ github.repository }}" --name build-artifacts-win-x64 --dir artifacts/x64
-          gh run download "$BUILD_RUN_ID" --repo "${{ github.repository }}" --name build-artifacts-win-x86 --dir artifacts/x86
-
-      - name: Prepare release assets
-        run: |
-          cp artifacts/x64/DB.Browser.for.SQLite-dev-cd3dead-win-x64.zip dist/DB-Browser-for-SQLite-Vim-Dracula-v2-Windows-x64-portable.zip
-          cp artifacts/x86/DB.Browser.for.SQLite-dev-cd3dead-win-x86.zip dist/DB-Browser-for-SQLite-Vim-Dracula-v2-Windows-x86-portable.zip
+          gh run download "$BUILD_RUN_ID" --name build-artifacts-win-x64 --dir artifacts/x64
+          gh run download "$BUILD_RUN_ID" --name build-artifacts-win-x86 --dir artifacts/x86
+          cp artifacts/x64/DB.Browser.for.SQLite-dev-74b4d98-win-x64.zip dist/DB-Browser-for-SQLite-Vim-Dracula-v3-Windows-x64-portable.zip
+          cp artifacts/x86/DB.Browser.for.SQLite-dev-74b4d98-win-x86.zip dist/DB-Browser-for-SQLite-Vim-Dracula-v3-Windows-x86-portable.zip
+          unzip -tq dist/*x64*.zip
+          unzip -tq dist/*x86*.zip
           cd dist
           sha256sum *.zip > SHA256SUMS.txt
-
-      - name: Create GitHub Release
+      - name: Publish prerelease
         run: |
-          if gh release view "$RELEASE_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" --repo "${{ github.repository }}" --clobber dist/*.zip dist/SHA256SUMS.txt
-          else
-            gh release create "$RELEASE_TAG" --repo "${{ github.repository }}" --target vim-mode-windows --title "DB Browser for SQLite Vim + Dracula v2" --prerelease --notes "Windows portable build with Vim mode, Dracula as the default theme, Consolas UI/editor/log fonts, corrected Vim e motion, Ctrl+W word deletion in Insert mode, and custom comma-leader mappings." dist/*.zip dist/SHA256SUMS.txt
-          fi
+          gh release create "$RELEASE_TAG" --target "$BUILD_SHA" --title "DB Browser for SQLite Vim + Dracula v3" --prerelease --notes "Adds W/B/E word motions and fixes punctuation movement, Escape caret position, repeated ^, rz mapping conflicts, pending Insert text, counted undo and join counts. Registers Traditional Chinese font fallbacks for Consolas/Fira Code and fixes SQL Log fonts without changing the shared editor lexer. Linux Vim regression tests must pass before Windows builds. Windows visual font appearance still requires user verification; full Neovim/init.lua is not supported." dist/*.zip dist/SHA256SUMS.txt
