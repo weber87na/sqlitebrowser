@@ -352,23 +352,23 @@ void TestVimInputHandler::textObjects_data()
     QTest::addColumn<QString>("keys");
     QTest::addColumn<QString>("expected");
     QTest::addColumn<bool>("insert");
-    QTest::newRow("inner-word") << "select customer from users" << 10 << "diw" << "select  from users" << false;
-    QTest::newRow("around-word") << "select customer from users" << 10 << "daw" << "select from users" << false;
-    QTest::newRow("two-words") << "select customer from users" << 10 << "d2iw" << "select  users" << false;
-    QTest::newRow("WORD") << "select schema.table from t" << 10 << "ciW" << "select  from t" << true;
-    QTest::newRow("inner-quotes") << "select 'customer'" << 10 << "ci'" << "select ''" << true;
-    QTest::newRow("around-quotes") << "select 'customer'" << 10 << "da'" << "select " << false;
-    QTest::newRow("nested") << "select (a + (b * c))" << 13 << "di(" << "select (a + ())" << false;
-    QTest::newRow("outer-nested") << "select (a + (b * c))" << 13 << "d2i(" << "select ()" << false;
-    QTest::newRow("closing-brace") << "select (abc)" << 11 << "da(" << "select " << false;
-    QTest::newRow("empty-change") << "select ()" << 8 << "ci(" << "select ()" << true;
-    QTest::newRow("unmatched") << "select (abc" << 9 << "di(" << "select (abc" << false;
-    QTest::newRow("cw-separator") << "one two" << 0 << "cw" << " two" << true;
-    QTest::newRow("cw-last-character") << "one two" << 2 << "cw" << "on two" << true;
-    QTest::newRow("counted-cw") << "one two three" << 0 << "c2w" << " three" << true;
-    QTest::newRow("visual-word") << "one two" << 1 << "viwd" << " two" << false;
-    QTest::newRow("visual-brackets") << "select (abc)" << 9 << "va(d" << "select " << false;
-    QTest::newRow("cancel") << "one two" << 0 << "di" << "one two" << false;
+    QTest::newRow("inner-word") << QStringLiteral("select customer from users") << 10 << QStringLiteral("diw") << QStringLiteral("select  from users") << false;
+    QTest::newRow("around-word") << QStringLiteral("select customer from users") << 10 << QStringLiteral("daw") << QStringLiteral("select from users") << false;
+    QTest::newRow("two-words") << QStringLiteral("select customer from users") << 10 << QStringLiteral("d2iw") << QStringLiteral("select  users") << false;
+    QTest::newRow("WORD") << QStringLiteral("select schema.table from t") << 10 << QStringLiteral("ciW") << QStringLiteral("select  from t") << true;
+    QTest::newRow("inner-quotes") << QStringLiteral("select 'customer'") << 10 << QStringLiteral("ci'") << QStringLiteral("select ''") << true;
+    QTest::newRow("around-quotes") << QStringLiteral("select 'customer'") << 10 << QStringLiteral("da'") << QStringLiteral("select ") << false;
+    QTest::newRow("nested") << QStringLiteral("select (a + (b * c))") << 13 << QStringLiteral("di(") << QStringLiteral("select (a + ())") << false;
+    QTest::newRow("outer-nested") << QStringLiteral("select (a + (b * c))") << 13 << QStringLiteral("d2i(") << QStringLiteral("select ()") << false;
+    QTest::newRow("closing-brace") << QStringLiteral("select (abc)") << 11 << QStringLiteral("da(") << QStringLiteral("select ") << false;
+    QTest::newRow("empty-change") << QStringLiteral("select ()") << 8 << QStringLiteral("ci(") << QStringLiteral("select ()") << true;
+    QTest::newRow("unmatched") << QStringLiteral("select (abc") << 9 << QStringLiteral("di(") << QStringLiteral("select (abc") << false;
+    QTest::newRow("cw-separator") << QStringLiteral("one two") << 0 << QStringLiteral("cw") << QStringLiteral(" two") << true;
+    QTest::newRow("cw-last-character") << QStringLiteral("one two") << 2 << QStringLiteral("cw") << QStringLiteral("on two") << true;
+    QTest::newRow("counted-cw") << QStringLiteral("one two three") << 0 << QStringLiteral("c2w") << QStringLiteral(" three") << true;
+    QTest::newRow("visual-word") << QStringLiteral("one two") << 1 << QStringLiteral("viwd") << QStringLiteral(" two") << false;
+    QTest::newRow("visual-brackets") << QStringLiteral("select (abc)") << 9 << QStringLiteral("va(d") << QStringLiteral("select ") << false;
+    QTest::newRow("cancel") << QStringLiteral("one two") << 0 << QStringLiteral("di") << QStringLiteral("one two") << false;
 }
 
 void TestVimInputHandler::textObjects()
