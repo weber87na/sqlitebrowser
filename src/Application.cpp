@@ -107,6 +107,14 @@ Application::Application(int& argc, char** argv) :
     setOrganizationName("sqlitebrowser");
     setApplicationName("DB Browser for SQLite");
 
+    // Latin coding fonts have no CJK glyphs. Register explicit Traditional
+    // Chinese fallbacks before constructing any editor or UI fonts.
+    const QStringList cjkFallbacks = QStringList()
+        << "Microsoft JhengHei UI" << "Microsoft JhengHei"
+        << "Noto Sans CJK TC" << "Noto Sans TC" << "PingFang TC";
+    QFont::insertSubstitutions("Consolas", cjkFallbacks);
+    QFont::insertSubstitutions("Fira Code", QStringList("Consolas") + cjkFallbacks);
+
     // Existing installations keep their QSettings when a portable build is
     // replaced. Apply the requested Vim/Dracula defaults once, then leave all
     // later user changes untouched.
@@ -418,6 +426,10 @@ void Application::reloadSettings()
     // Font settings
     QFont f = font();
     f.setFamily(Settings::getValue("General", "font").toString());
+#if QT_VERSION >= QT_VERSION_CHECK(5, 13, 0)
+    f.setFamilies(QStringList() << f.family() << "Microsoft JhengHei UI"
+                  << "Microsoft JhengHei" << "Noto Sans CJK TC" << "Noto Sans TC");
+#endif
     f.setPointSize(Settings::getValue("General", "fontsize").toInt());
     setFont(f);
 }

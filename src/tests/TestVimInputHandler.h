@@ -8,6 +8,8 @@ class TestVimInputHandler : public QObject
     Q_OBJECT
 
 private slots:
+    void enhancedMotions();
+    void mappingPrefixAndEscape();
     void insertAndEscape();
     void insertCtrlWDeletesPreviousWord();
     void normalMotionsAndDelete();

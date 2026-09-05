@@ -2462,6 +2462,20 @@ void MainWindow::reloadSettings()
     ui->editLogApplication->setFont(logfont);
     ui->editLogUser->setFont(logfont);
     ui->editLogErrorLog->setFont(logfont);
+    // With a lexer, setFont alone does not update styled SQL text.
+    const QList<ExtendedScintilla*> logs = {
+        ui->editLogApplication, ui->editLogUser, ui->editLogErrorLog};
+    for(auto* log : logs)
+    {
+        log->setMarginsFont(logfont);
+        // SQL lexers are shared with editors: modify only this view's styles.
+        const QByteArray family = logfont.family().toUtf8();
+        for(int style = 0; style <= 255; ++style)
+        {
+            log->SendScintilla(QsciScintillaBase::SCI_STYLESETFONT, style, family.constData());
+            log->SendScintilla(QsciScintillaBase::SCI_STYLESETSIZE, style, logfont.pointSize());
+        }
+    }
     editDock->reloadSettings();
 
     // Set font for database structure views

@@ -84,8 +84,18 @@ VimInputHandler::Mode VimInputHandler::mode() const
 
 bool VimInputHandler::eventFilter(QObject* watched, QEvent* event)
 {
-    if(!m_enabled || watched != m_editor || event->type() != QEvent::KeyPress)
+    if(!m_enabled || watched != m_editor)
         return QObject::eventFilter(watched, event);
+
+    if(event->type() == QEvent::FocusOut || event->type() == QEvent::InputMethod)
+        flushInsertMappingPrefix();
+    if(event->type() != QEvent::KeyPress)
+        return QObject::eventFilter(watched, event);
+
+    auto* key = static_cast<QKeyEvent*>(event);
+    if(m_mode == Mode::Insert && (key->text().isEmpty() ||
+       key->modifiers().testFlag(Qt::ControlModifier)))
+        flushInsertMappingPrefix();
 
     return handleKeyPress(static_cast<QKeyEvent*>(event));
 }
@@ -104,6 +114,8 @@ bool VimInputHandler::handleKeyPress(QKeyEvent* event)
 
         if(m_mode == Mode::Insert)
         {
+            if(currentPosition() > positionFromLine(currentLine()))
+                setPosition(positionBefore(currentPosition()));
             setMode(Mode::Normal);
             clampNormalCaret();
         }
@@ -143,6 +155,9 @@ bool VimInputHandler::handleKeyPress(QKeyEvent* event)
 
 bool VimInputHandler::handleCustomMapping(QKeyEvent* event)
 {
+    // A replacement character belongs to r, even if it is a mapping prefix.
+    if(!m_pendingCommand.isEmpty())
+        return false;
     if(event->modifiers().testFlag(Qt::ControlModifier) ||
        event->modifiers().testFlag(Qt::AltModifier) ||
        event->modifiers().testFlag(Qt::MetaModifier))
@@ -213,6 +228,8 @@ bool VimInputHandler::executeCustomMapping(const QString& mapping)
     {
         if(mapping == ",,")
         {
+            if(currentPosition() > positionFromLine(currentLine()))
+                setPosition(positionBefore(currentPosition()));
             setMode(Mode::Normal);
             clampNormalCaret();
             return true;
@@ -321,18 +338,20 @@ void VimInputHandler::flushInsertMappingPrefix()
 
 bool VimInputHandler::handleControlKey(QKeyEvent* event)
 {
+    const int count = (event->key() == Qt::Key_D || event->key() == Qt::Key_U)
+        ? takeCount() : 1;
     switch(event->key())
     {
     case Qt::Key_R:
         m_editor->redo();
         return true;
     case Qt::Key_D:
-        for(int i = 0; i < takeCount(); ++i)
+        for(int i = 0; i < count; ++i)
             m_editor->SendScintilla(QsciScintillaBase::SCI_PAGEDOWN);
         clampNormalCaret();
         return true;
     case Qt::Key_U:
-        for(int i = 0; i < takeCount(); ++i)
+        for(int i = 0; i < count; ++i)
             m_editor->SendScintilla(QsciScintillaBase::SCI_PAGEUP);
         clampNormalCaret();
         return true;
@@ -439,7 +458,8 @@ bool VimInputHandler::handleNormalKey(QKeyEvent* event)
     }
     if(key == "u")
     {
-        for(int i = 0; i < takeCount(); ++i)
+        const int count = takeCount();
+        for(int i = 0; i < count; ++i)
             m_editor->undo();
         clampNormalCaret();
         return true;
@@ -762,7 +782,8 @@ bool VimInputHandler::move(const QString& command, int count)
     }
     else if(command == "^")
     {
-        m_editor->SendScintilla(QsciScintillaBase::SCI_VCHOME);
+        setPosition(static_cast<int>(m_editor->SendScintilla(
+            QsciScintillaBase::SCI_GETLINEINDENTPOSITION, currentLine())));
         clampNormalCaret();
     }
     else if(command == "$")
@@ -772,19 +793,46 @@ bool VimInputHandler::move(const QString& command, int count)
         m_editor->SendScintilla(QsciScintillaBase::SCI_LINEEND);
         clampNormalCaret();
     }
-    else if(command == "w" || command == "b" || command == "e")
+    else if(command == "w" || command == "b" || command == "e" ||
+            command == "W" || command == "B" || command == "E")
     {
-        if(command == "e")
+        const bool bigWord = command == command.toUpper();
+        const QString motion = command.toLower();
+        auto category = [this, bigWord](int p) {
+            const int c = characterClassAt(p);
+            return bigWord && c != 0 ? 1 : c;
+        };
+        for(int i = 0; i < count; ++i)
         {
-            for(int i = 0; i < count; ++i)
-                setPosition(nextWordEndPosition(currentPosition()));
-        }
-        else
-        {
-            const int message = command == "b" ? QsciScintillaBase::SCI_WORDLEFT
-                                                : QsciScintillaBase::SCI_WORDRIGHT;
-            for(int i = 0; i < count; ++i)
-                m_editor->SendScintilla(message);
+            int p = currentPosition();
+            if(motion == "b")
+            {
+                if(p > 0) p = positionBefore(p);
+                while(p > 0 && category(p) == 0) p = positionBefore(p);
+                const int c = category(p);
+                while(p > 0 && category(positionBefore(p)) == c)
+                    p = positionBefore(p);
+            }
+            else if(motion == "w")
+            {
+                const int c = category(p);
+                while(p < documentLength() && category(p) == c)
+                    p = positionAfter(p);
+                while(p < documentLength() && category(p) == 0)
+                    p = positionAfter(p);
+            }
+            else
+            {
+                if(p < documentLength()) p = positionAfter(p);
+                while(p < documentLength() && category(p) == 0)
+                    p = positionAfter(p);
+                const int c = category(p);
+                while(p < documentLength() && positionAfter(p) < documentLength() &&
+                      category(positionAfter(p)) == c)
+                    p = positionAfter(p);
+                if(p >= documentLength()) p = positionBefore(documentLength());
+            }
+            setPosition(p);
         }
         clampNormalCaret();
     }
@@ -833,7 +881,7 @@ bool VimInputHandler::applyOperatorMotion(const QString& command, int count)
     }
 
     int target = command == "$" ? lineEndPosition(currentLine()) : currentPosition();
-    if(command == "e" && target >= start)
+    if((command == "e" || command == "E") && target >= start)
         target = positionAfter(target);
     int first = std::min(start, target);
     int last = std::max(start, target);
@@ -965,7 +1013,7 @@ void VimInputHandler::joinLines(int count)
 
     const int start = currentPosition();
     const int firstLine = currentLine();
-    const int lastLine = std::min(m_editor->lines() - 1, firstLine + std::max(1, count));
+    const int lastLine = std::min(m_editor->lines() - 1, firstLine + std::max(2, count) - 1);
     setSelection(positionFromLine(firstLine), lineEndPosition(lastLine));
     m_editor->SendScintilla(QsciScintillaBase::SCI_LINESJOIN);
     setPosition(start);

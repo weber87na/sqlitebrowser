@@ -301,3 +301,46 @@ void TestVimInputHandler::disabledLeavesEditorUnchanged()
 }
 
 QTEST_MAIN(TestVimInputHandler)
+
+void TestVimInputHandler::enhancedMotions()
+{
+    QsciScintilla editor;
+    VimInputHandler handler(&editor);
+    editor.setText("  abc.def ghi");
+    prepareEditor(editor);
+    editor.setCursorPosition(0, 2);
+    handler.setEnabled(true);
+    QTest::keyClicks(&editor, "^^");
+    QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 2L);
+    QTest::keyClicks(&editor, "w");
+    QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 5L);
+    QTest::keyClicks(&editor, "w");
+    QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 6L);
+    QTest::keyClick(&editor, Qt::Key_B, Qt::ShiftModifier);
+    QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 2L);
+    QTest::keyClick(&editor, Qt::Key_E, Qt::ShiftModifier);
+    QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 8L);
+    QTest::keyClick(&editor, Qt::Key_W, Qt::ShiftModifier);
+    QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 10L);
+    QTest::keyClicks(&editor, "rz");
+    QCOMPARE(editor.text(), QString("  abc.def zhi"));
+}
+
+void TestVimInputHandler::mappingPrefixAndEscape()
+{
+    QsciScintilla editor;
+    VimInputHandler handler(&editor);
+    editor.setText("abcd");
+    prepareEditor(editor);
+    editor.setCursorPosition(0, 2);
+    handler.setEnabled(true);
+    QTest::keyClicks(&editor, "i");
+    QTest::keyClick(&editor, Qt::Key_Escape);
+    QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 1L);
+    QTest::keyClicks(&editor, "iz");
+    QTest::keyClick(&editor, Qt::Key_Right);
+    QCOMPARE(editor.text(), QString("azbcd"));
+    QTest::keyClick(&editor, Qt::Key_Escape);
+    QTest::qWait(750);
+    QCOMPARE(editor.text(), QString("azbcd"));
+}
