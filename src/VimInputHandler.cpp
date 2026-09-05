@@ -938,7 +938,7 @@ bool VimInputHandler::applyTextObject(const QString& object, bool around, int co
             first = -1;
             // A closing delimiter under the caret belongs to its own pair.
             int scan = std::min(caret, bytes.size() - 1);
-            if(scan < bytes.size() && bytes.at(scan) == close) --scan;
+            if(scan >= 0 && scan < bytes.size() && bytes.at(scan) == close) --scan;
             for(int p = scan; p >= 0; --p)
             {
                 if(bytes.at(p) == close) ++depth;

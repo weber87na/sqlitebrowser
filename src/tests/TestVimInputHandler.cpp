@@ -368,6 +368,8 @@ void TestVimInputHandler::textObjects_data()
     QTest::newRow("counted-cw") << QStringLiteral("one two three") << 0 << QStringLiteral("c2w") << QStringLiteral(" three") << true;
     QTest::newRow("visual-word") << QStringLiteral("one two") << 1 << QStringLiteral("viwd") << QStringLiteral(" two") << false;
     QTest::newRow("visual-brackets") << QStringLiteral("select (abc)") << 9 << QStringLiteral("va(d") << QStringLiteral("select ") << false;
+    QTest::newRow("empty-document") << QStringLiteral("") << 0 << QStringLiteral("di(") << QStringLiteral("") << false;
+    QTest::newRow("unicode-quotes") << QStringLiteral("select '中文名稱'") << 9 << QStringLiteral("ci'") << QStringLiteral("select ''") << true;
     QTest::newRow("cancel") << QStringLiteral("one two") << 0 << QStringLiteral("di") << QStringLiteral("one two") << false;
 }
 
