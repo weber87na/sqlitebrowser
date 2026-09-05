@@ -506,6 +506,19 @@ bool VimInputHandler::handlePendingKey(QKeyEvent* event)
 {
     const QString key = commandKey(event);
 
+    if(m_pendingCommand.endsWith("i") || m_pendingCommand.endsWith("a"))
+    {
+        applyTextObject(key, m_pendingCommand.endsWith("a"), m_pendingCount * takeCount());
+        resetPendingCommand();
+        return true;
+    }
+    if((key == "i" || key == "a") &&
+       (m_pendingCommand == "d" || m_pendingCommand == "c" || m_pendingCommand == "y"))
+    {
+        m_pendingCommand += key;
+        return true;
+    }
+
     if(m_pendingCommand == "r")
     {
         if(!key.isEmpty())
@@ -558,6 +571,20 @@ bool VimInputHandler::handlePendingKey(QKeyEvent* event)
 bool VimInputHandler::handleVisualKey(QKeyEvent* event)
 {
     const QString key = commandKey(event);
+
+    if(m_pendingCommand == "vi" || m_pendingCommand == "va")
+    {
+        setPosition(m_visualCaret);
+        applyTextObject(key, m_pendingCommand == "va", takeCount());
+        resetPendingCommand();
+        return true;
+    }
+    if(key == "i" || key == "a")
+    {
+        m_pendingCommand = "v" + key;
+        return true;
+    }
+
 
     if(key.length() == 1 && key.at(0).isDigit() && !(key == "0" && m_count == 0))
     {
@@ -858,6 +885,124 @@ bool VimInputHandler::move(const QString& command, int count)
     return true;
 }
 
+bool VimInputHandler::applyTextObject(const QString& object, bool around, int count)
+{
+    const int caret = currentPosition();
+    int first = caret;
+    int last = caret;
+    if(object == "w" || object == "W")
+    {
+        if(caret >= documentLength()) return false;
+        const auto category = [this, &object](int p) {
+            const int c = characterClassAt(p);
+            return object == "W" && c != 0 ? 1 : c;
+        };
+        const int initial = category(caret);
+        while(first > 0 && category(positionBefore(first)) == initial)
+            first = positionBefore(first);
+        while(last < documentLength() && category(last) == initial)
+            last = positionAfter(last);
+        for(int i = 1; i < count; ++i)
+        {
+            while(last < documentLength() && category(last) == 0)
+                last = positionAfter(last);
+            const int c = category(last);
+            while(last < documentLength() && category(last) == c)
+                last = positionAfter(last);
+        }
+        if(around)
+        {
+            const int beforeSpace = last;
+            while(last < documentLength() && category(last) == 0)
+                last = positionAfter(last);
+            if(last == beforeSpace)
+                while(first > 0 && category(positionBefore(first)) == 0)
+                    first = positionBefore(first);
+        }
+    }
+    else
+    {
+        const QByteArray bytes = m_editor->text().toUtf8();
+        const QString opens = "([{<";
+        const QString closes = ")]}>";
+        int kind = opens.indexOf(object);
+        if(kind < 0) kind = closes.indexOf(object);
+        if(object == "b") kind = 0;
+        if(object == "B") kind = 2;
+        if(kind >= 0 && object.size() == 1)
+        {
+            const char open = opens.at(kind).toLatin1();
+            const char close = closes.at(kind).toLatin1();
+            int depth = 0;
+            int remaining = count;
+            first = -1;
+            // A closing delimiter under the caret belongs to its own pair.
+            int scan = std::min(caret, bytes.size() - 1);
+            if(scan < bytes.size() && bytes.at(scan) == close) --scan;
+            for(int p = scan; p >= 0; --p)
+            {
+                if(bytes.at(p) == close) ++depth;
+                if(bytes.at(p) == open)
+                {
+                    if(depth > 0) --depth;
+                    else if(--remaining == 0) { first = p; break; }
+                }
+            }
+            if(first < 0) return false;
+            depth = 1;
+            last = first + 1;
+            for(; last < bytes.size(); ++last)
+            {
+                if(bytes.at(last) == open) ++depth;
+                if(bytes.at(last) == close && --depth == 0) break;
+            }
+            if(last >= bytes.size() || last < caret) return false;
+        }
+        else if(object == "\"" || object == "'" || object == "`")
+        {
+            if(count != 1) return false;
+            const char quote = object.at(0).toLatin1();
+            first = -1;
+            last = -1;
+            int opening = -1;
+            for(int p = positionFromLine(currentLine()); p < lineEndPosition(currentLine()); ++p)
+            {
+                if(bytes.at(p) != quote) continue;
+                int slashes = 0;
+                for(int q = p - 1; q >= 0 && bytes.at(q) == '\\'; --q) ++slashes;
+                if(slashes % 2) continue;
+                if(opening < 0) opening = p;
+                else
+                {
+                    if(p >= caret) { first = opening; last = p; break; }
+                    opening = -1;
+                }
+            }
+            if(first < 0) return false;
+        }
+        else return false;
+        if(around) ++last;
+        else ++first;
+    }
+    if(m_pendingCommand.startsWith("v"))
+    {
+        if(last <= first) return false;
+        m_mode = Mode::Visual;
+        m_visualAnchor = first;
+        m_visualCaret = positionBefore(last);
+        updateVisualSelection();
+        emit modeChanged();
+    }
+    else if(last == first && m_pendingCommand.startsWith("c"))
+    {
+        setPosition(first);
+        setMode(Mode::Insert);
+    }
+    else
+        applyCharacterOperator(first, last);
+    return true;
+}
+
 bool VimInputHandler::applyOperatorMotion(const QString& command, int count)
 {
     const int start = currentPosition();
@@ -871,6 +1016,28 @@ bool VimInputHandler::applyOperatorMotion(const QString& command, int count)
             applyLineOperator(startLine, startLine + count);
         else
             applyLineOperator(startLine - count, startLine);
+        return true;
+    }
+
+    // Vim treats cw/cW on non-whitespace as ce/cE: preserve the separator.
+    if(m_pendingCommand.startsWith("c") && (command == "w" || command == "W") &&
+       characterClassAt(start) != 0)
+    {
+        int target = start;
+        const auto category = [this, &command](int p) {
+            const int c = characterClassAt(p);
+            return command == "W" && c != 0 ? 1 : c;
+        };
+        for(int i = 0; i < count; ++i)
+        {
+            const int c = category(target);
+            while(target < documentLength() && category(target) == c)
+                target = positionAfter(target);
+            if(i + 1 < count)
+                while(target < documentLength() && category(target) == 0)
+                    target = positionAfter(target);
+        }
+        applyCharacterOperator(start, target);
         return true;
     }
 

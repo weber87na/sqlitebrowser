@@ -72,6 +72,7 @@ private:
     void clampNormalCaret();
 
     bool move(const QString& command, int count);
+    bool applyTextObject(const QString& object, bool around, int count);
     bool applyOperatorMotion(const QString& command, int count);
     void applyCharacterOperator(int start, int end);
     void applyLineOperator(int firstLine, int lastLine);
