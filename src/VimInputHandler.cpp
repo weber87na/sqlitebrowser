@@ -192,11 +192,12 @@ bool VimInputHandler::isCustomMappingPrefix(const QString& mapping) const
 {
     QStringList mappings;
     if(m_mode == Mode::Insert)
-        mappings = {",,", "z;", "zh", "zl", "z,"};
+        mappings = QStringList() << ",," << "z;" << "zh" << "zl" << "z,";
     else if(m_mode == Mode::Normal)
-        mappings = {",,", ",ss", ",ci", ",xs", "zh", "zl", "z;", "z,"};
+        mappings = QStringList() << ",," << ",ss" << ",ci" << ",xs"
+                                 << "zh" << "zl" << "z;" << "z,";
     else
-        mappings = {",,", ",aa", ",ci", ",ss"};
+        mappings = QStringList() << ",," << ",aa" << ",ci" << ",ss";
 
     for(const QString& candidate : mappings)
     {
