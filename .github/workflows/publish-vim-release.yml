@@ -1,8 +1,5 @@
 name: Publish Vim Dracula Release
 on:
-  push:
-    branches: [vim-mode-windows]
-    paths: [.github/workflows/publish-vim-release.yml]
   workflow_dispatch:
 permissions:
   actions: read
