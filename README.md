@@ -82,11 +82,31 @@ The editor shows the active mode in its lower-right corner. Supported commands
 include:
 
 * Modes: `i`, `I`, `a`, `A`, `o`, `O`, `Esc`, `v`, and `V`
-* Motions: `h`, `j`, `k`, `l`, `w`, `b`, `e`, `0`, `^`, `$`, `gg`, `G`, and `%`
+* Motions: `h`, `j`, `k`, `l`, `w`, `b`, `e`, `W`, `B`, `E`, `0`, `^`, `$`, `gg`, `G`, and `%`
 * Editing: `x`, `s`, `d`, `c`, `y`, `r`, `p`, `P`, `J`, `~`, `u`, and `Ctrl+R`
 * Searching: `/`, `?`, `n`, and `N`
 * Counts and common combinations such as `3w`, `2dd`, `dw`, `d$`, `yy`, and
   visual-mode `d`, `c`, or `y`
+
+Text objects work with `d`, `c`, `y`, and Visual mode:
+
+| Keys | Operation |
+| --- | --- |
+| `ciw`, `diw`, `yiw`, `viw` | Change, delete, yank, or select the word under the cursor |
+| `daw` | Delete a word and adjacent whitespace |
+| `ciW` | Change a whitespace-delimited WORD, including punctuation |
+| `ci'`, `ci"`, "ci`" | Change the contents of a quoted string on the current line |
+| `di(`, `di[`, `di{`, `di<` | Delete the contents of an enclosing delimiter pair |
+| `da(`, `va(` | Delete or select a pair including its delimiters |
+| `d2i(` | Delete the contents of the next enclosing parenthesis pair |
+
+Opening and closing bracket names are interchangeable; `b` means parentheses
+and `B` means braces. Word counts such as `d2iw` are supported. `cw` and `cW`
+on non-whitespace preserve the separator after the changed word. Escape cancels
+an incomplete command. Missing enclosing pairs leave the document unchanged.
+Bracket objects use balanced delimiters, not a SQL parser; quotes and comments
+inside a block are not parsed specially. This is a Vim emulation subset, not a
+Neovim runtime or a general-purpose `init.lua` interpreter.
 
 Yanks and deletes use the system clipboard, so text can be copied to and from
 other Windows applications.
