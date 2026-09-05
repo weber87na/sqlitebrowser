@@ -396,3 +396,59 @@ void TestVimInputHandler::textObjects()
         QCOMPARE(editor.text(), input);
     }
 }
+
+void TestVimInputHandler::surround_data()
+{
+    QTest::addColumn<QString>("input");
+    QTest::addColumn<int>("column");
+    QTest::addColumn<QString>("keys");
+    QTest::addColumn<QString>("expected");
+    QTest::addColumn<bool>("readOnly");
+    QTest::newRow("add-word") << QStringLiteral("one two") << 1 << QStringLiteral("ysiw\"") << QStringLiteral("\"one\" two") << false;
+    QTest::newRow("add-padded") << QStringLiteral("one two") << 1 << QStringLiteral("ysiw(") << QStringLiteral("( one ) two") << false;
+    QTest::newRow("add-tight") << QStringLiteral("one two") << 1 << QStringLiteral("ysiw)") << QStringLiteral("(one) two") << false;
+    QTest::newRow("line") << QStringLiteral("  select *") << 3 << QStringLiteral("yss]") << QStringLiteral("  [select *]") << false;
+    QTest::newRow("motion") << QStringLiteral("one two") << 0 << QStringLiteral("yse\"") << QStringLiteral("\"one\" two") << false;
+    QTest::newRow("two-words") << QStringLiteral("one two three") << 0 << QStringLiteral("ys2iw\"") << QStringLiteral("\"one two\" three") << false;
+    QTest::newRow("change") << QStringLiteral("\"one\" two") << 2 << QStringLiteral("cs\"' ") << QStringLiteral("'one' two") << false;
+    QTest::newRow("delete") << QStringLiteral("\"one\" two") << 2 << QStringLiteral("ds\"") << QStringLiteral("one two") << false;
+    QTest::newRow("padding") << QStringLiteral("( one )") << 3 << QStringLiteral("ds(") << QStringLiteral("one") << false;
+    QTest::newRow("nested") << QStringLiteral("((one))") << 3 << QStringLiteral("2ds(") << QStringLiteral("(one)") << false;
+    QTest::newRow("empty") << QStringLiteral("()") << 1 << QStringLiteral("cs)\"") << QStringLiteral("\"\"") << false;
+    QTest::newRow("visual") << QStringLiteral("one two") << 1 << QStringLiteral("viwS\"") << QStringLiteral("\"one\" two") << false;
+    QTest::newRow("unicode") << QStringLiteral("select '中文'") << 9 << QStringLiteral("cs'\"") << QStringLiteral("select \"中文\"") << false;
+    QTest::newRow("missing") << QStringLiteral("one two") << 1 << QStringLiteral("ds\"") << QStringLiteral("one two") << false;
+    QTest::newRow("invalid") << QStringLiteral("one two") << 1 << QStringLiteral("ysiwq") << QStringLiteral("one two") << false;
+    QTest::newRow("cancel") << QStringLiteral("one two") << 1 << QStringLiteral("ysiw") << QStringLiteral("one two") << false;
+    QTest::newRow("empty-doc") << QStringLiteral("") << 0 << QStringLiteral("ds(") << QStringLiteral("") << false;
+    QTest::newRow("readonly") << QStringLiteral("one") << 0 << QStringLiteral("ysiw)") << QStringLiteral("one") << true;
+}
+
+void TestVimInputHandler::surround()
+{
+    QFETCH(QString, input);
+    QFETCH(int, column);
+    QFETCH(QString, keys);
+    QFETCH(QString, expected);
+    QFETCH(bool, readOnly);
+    QsciScintilla editor;
+    VimInputHandler handler(&editor);
+    editor.setText(input);
+    editor.setReadOnly(readOnly);
+    prepareEditor(editor);
+    editor.setCursorPosition(0, column);
+    handler.setEnabled(true);
+    QApplication::clipboard()->setText("clipboard sentinel");
+    QTest::keyClicks(&editor, keys);
+    QTest::keyClick(&editor, Qt::Key_Escape);
+    QCOMPARE(editor.text(), expected);
+    QCOMPARE(QApplication::clipboard()->text(), QString("clipboard sentinel"));
+    QCOMPARE(handler.mode(), VimInputHandler::Mode::Normal);
+    if(input != expected)
+    {
+        QTest::keyClick(&editor, Qt::Key_U);
+        QCOMPARE(editor.text(), input);
+        QTest::keyClick(&editor, Qt::Key_R, Qt::ControlModifier);
+        QCOMPARE(editor.text(), expected);
+    }
+}

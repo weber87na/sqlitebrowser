@@ -108,6 +108,16 @@ Bracket objects use balanced delimiters, not a SQL parser; quotes and comments
 inside a block are not parsed specially. This is a Vim emulation subset, not a
 Neovim runtime or a general-purpose `init.lua` interpreter.
 
+Surround editing supports `ys{motion}{delimiter}`, `ysiw"`, `yss)`,
+`cs"'`, `ds"`, and Visual-mode `S{delimiter}`. Supported delimiters are
+parentheses, square/curly/angle brackets, single/double quotes, and backticks.
+Opening `(`, `[`, `{` add padding; closing `)`, `]`, `}` do not.
+`b` and `B` are aliases for tight parentheses and braces. Counts select words
+or enclosing bracket levels (for example `ys2iw"`, `2ds)`). Each completed
+surround edit is one undo action and leaves the clipboard unchanged. Escape
+cancels an unfinished command. HTML tags, custom surround definitions, insert
+mode surround, and dot-repeat are not implemented.
+
 Yanks and deletes use the system clipboard, so text can be copied to and from
 other Windows applications.
 

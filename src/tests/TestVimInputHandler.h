@@ -8,6 +8,8 @@ class TestVimInputHandler : public QObject
     Q_OBJECT
 
 private slots:
+    void surround_data();
+    void surround();
     void textObjects_data();
     void textObjects();
     void enhancedMotions();

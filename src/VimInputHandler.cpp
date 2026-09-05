@@ -505,6 +505,13 @@ bool VimInputHandler::handleNormalKey(QKeyEvent* event)
 bool VimInputHandler::handlePendingKey(QKeyEvent* event)
 {
     const QString key = commandKey(event);
+    if(handleSurroundKey(key)) return true;
+    if(key == "s" && (m_pendingCommand == "y" || m_pendingCommand == "c" || m_pendingCommand == "d"))
+    {
+        m_pendingCommand += "s";
+        return true;
+    }
+
 
     if(m_pendingCommand.endsWith("i") || m_pendingCommand.endsWith("a"))
     {
@@ -571,6 +578,19 @@ bool VimInputHandler::handlePendingKey(QKeyEvent* event)
 bool VimInputHandler::handleVisualKey(QKeyEvent* event)
 {
     const QString key = commandKey(event);
+    if(m_pendingCommand == "vs")
+    {
+        finishSurround(key);
+        return true;
+    }
+    if(key == "S")
+    {
+        m_surroundStart = static_cast<int>(m_editor->SendScintilla(QsciScintillaBase::SCI_GETSELECTIONSTART));
+        m_surroundEnd = static_cast<int>(m_editor->SendScintilla(QsciScintillaBase::SCI_GETSELECTIONEND));
+        m_pendingCommand = "vs";
+        return true;
+    }
+
 
     if(m_pendingCommand == "vi" || m_pendingCommand == "va")
     {
@@ -885,11 +905,120 @@ bool VimInputHandler::move(const QString& command, int count)
     return true;
 }
 
-bool VimInputHandler::applyTextObject(const QString& object, bool around, int count)
+bool VimInputHandler::handleSurroundKey(const QString& key)
+{
+    if(m_pendingCommand == "ys-ready" || m_pendingCommand == "cs-ready")
+    {
+        finishSurround(key);
+        return true;
+    }
+    if(m_pendingCommand == "ds" || m_pendingCommand == "cs")
+    {
+        const bool change = m_pendingCommand == "cs";
+        if(!QStringLiteral("()[]{}<>bB\"'`").contains(key) || key.size() != 1 ||
+           !textObjectRange(key, true, m_pendingCount * takeCount(), m_surroundStart, m_surroundEnd))
+            resetPendingCommand();
+        else if(change)
+            m_pendingCommand = "cs-ready";
+        else
+            finishSurround(QString(), true);
+        return true;
+    }
+    if(m_pendingCommand == "ysi" || m_pendingCommand == "ysa")
+    {
+        if(textObjectRange(key, m_pendingCommand == "ysa", m_pendingCount * takeCount(),
+                           m_surroundStart, m_surroundEnd))
+            m_pendingCommand = "ys-ready";
+        else
+            resetPendingCommand();
+        return true;
+    }
+    if(m_pendingCommand != "ys") return false;
+    if(key == "i" || key == "a")
+    {
+        m_pendingCommand += key;
+        return true;
+    }
+    const int count = m_pendingCount * takeCount();
+    if(key == "s")
+    {
+        m_surroundStart = static_cast<int>(m_editor->SendScintilla(QsciScintillaBase::SCI_GETLINEINDENTPOSITION, currentLine()));
+        m_surroundEnd = lineEndPosition(std::min(m_editor->lines() - 1, currentLine() + count - 1));
+    }
+    else
+    {
+        // Characterwise motions only. Linewise motions require separate layout semantics.
+        if(key == "j" || key == "k" || key == "G" || !applyOperatorMotion(key, count))
+        {
+            resetPendingCommand();
+            return true;
+        }
+        setPosition(m_surroundStart);
+    }
+    m_pendingCommand = "ys-ready";
+    return true;
+}
+
+void VimInputHandler::finishSurround(const QString& delimiter, bool remove)
+{
+    QString left, right;
+    if(!remove)
+    {
+        QString key = delimiter;
+        if(key == "b") key = ")";
+        if(key == "B") key = "}";
+        const QString opens = "([{<";
+        const QString closes = ")]}>";
+        int pair = opens.indexOf(key);
+        const bool padded = pair >= 0 && pair < 3;
+        if(pair < 0) pair = closes.indexOf(key);
+        if(key.size() == 1 && pair >= 0)
+        {
+            left = opens.mid(pair, 1) + (padded ? " " : "");
+            right = (padded ? " " : "") + closes.mid(pair, 1);
+        }
+        else if(key == "\"" || key == "'" || key == "`")
+            left = right = key;
+        else
+        {
+            resetPendingCommand();
+            return;
+        }
+    }
+    const bool replacing = remove || m_pendingCommand == "cs-ready";
+    const int first = m_surroundStart;
+    const int last = m_surroundEnd;
+    if(m_editor->isReadOnly() || first < 0 || last > documentLength() || last < first ||
+       (replacing && last - first < 2))
+    {
+        resetPendingCommand();
+        return;
+    }
+    int innerStart = first + (replacing ? 1 : 0);
+    int innerEnd = last - (replacing ? 1 : 0);
+    // Removing/changing a padded bracket also removes its adjacent padding.
+    const QByteArray bytes = m_editor->text().toUtf8();
+    if(replacing && QStringLiteral("([{ ").contains(QChar(bytes.at(first))))
+    {
+        while(innerStart < innerEnd && (bytes.at(innerStart) == ' ' || bytes.at(innerStart) == '\t')) ++innerStart;
+        while(innerEnd > innerStart && (bytes.at(innerEnd - 1) == ' ' || bytes.at(innerEnd - 1) == '\t')) --innerEnd;
+    }
+    const QString body = QString::fromUtf8(bytes.mid(innerStart, innerEnd - innerStart));
+    m_editor->beginUndoAction();
+    setSelection(first, last);
+    m_editor->replaceSelectedText(left + body + right);
+    m_editor->endUndoAction();
+    setMode(Mode::Normal);
+    setPosition(first);
+    clampNormalCaret();
+    resetPendingCommand();
+}
+
+bool VimInputHandler::textObjectRange(const QString& object, bool around, int count, int& first, int& last) const
 {
     const int caret = currentPosition();
-    int first = caret;
-    int last = caret;
+    first = caret;
+    last = caret;
     if(object == "w" || object == "W")
     {
         if(caret >= documentLength()) return false;
@@ -984,6 +1113,13 @@ bool VimInputHandler::applyTextObject(const QString& object, bool around, int co
         if(around) ++last;
         else ++first;
     }
+    return true;
+}
+
+bool VimInputHandler::applyTextObject(const QString& object, bool around, int count)
+{
+    int first, last;
+    if(!textObjectRange(object, around, count, first, last)) return false;
     if(m_pendingCommand.startsWith("v"))
     {
         if(last <= first) return false;
@@ -1060,6 +1196,13 @@ bool VimInputHandler::applyOperatorMotion(const QString& command, int count)
 
 void VimInputHandler::applyCharacterOperator(int start, int end)
 {
+    if(m_pendingCommand == "ys")
+    {
+        m_surroundStart = start;
+        m_surroundEnd = end;
+        return;
+    }
+
     if(end <= start)
     {
         setPosition(start);

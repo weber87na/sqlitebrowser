@@ -72,6 +72,11 @@ private:
     void clampNormalCaret();
 
     bool move(const QString& command, int count);
+    bool textObjectRange(const QString& object, bool around, int count, int& first, int& last) const;
+    bool handleSurroundKey(const QString& key);
+    void finishSurround(const QString& delimiter, bool remove = false);
+    int m_surroundStart = 0;
+    int m_surroundEnd = 0;
     bool applyTextObject(const QString& object, bool around, int count);
     bool applyOperatorMotion(const QString& command, int count);
     void applyCharacterOperator(int start, int end);
