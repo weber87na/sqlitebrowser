@@ -8,6 +8,8 @@ class TestVimInputHandler : public QObject
     Q_OBJECT
 
 private slots:
+    void countedInsert();
+    void numericAndSqlMappings();
     void blockEditing();
     void configMappings();
     void findRepeatAndMarks();

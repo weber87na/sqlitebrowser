@@ -239,10 +239,10 @@ bool VimInputHandler::isCustomMappingPrefix(const QString& mapping) const
     if(m_mode == Mode::Insert)
         mappings = QStringList() << ",," << "z;" << "zh" << "zl" << "z,";
     else if(m_mode == Mode::Normal)
-        mappings = QStringList() << ",," << ",ss" << ",ci" << ",xs" << ",xm"
+        mappings = QStringList() << ",," << ",ss" << ",ci" << ",xs" << ",xm" << ",xf"
                                  << "zh" << "zl" << "z;" << "z," << "zz" << "zt" << "zb";
     else
-        mappings = QStringList() << ",," << ",aa" << ",ci" << ",ss";
+        mappings = QStringList() << ",," << ",aa" << ",ci" << ",ss" << ";h" << ";q";
 
     const QString modePrefix = m_mode == Mode::Insert ? "i:" : m_mode == Mode::Normal ? "n:" : "x:";
     for(auto it = m_userMappings.constBegin(); it != m_userMappings.constEnd(); ++it)
@@ -260,6 +260,35 @@ bool VimInputHandler::executeCustomMapping(const QString& mapping)
     const QString name = (m_mode == Mode::Insert ? "i:" : m_mode == Mode::Normal ? "n:" : "x:") + mapping;
     if(m_replayDepth == 0 && m_userMappings.contains(name))
     { m_mappingPrefix.clear(); playMapping(m_userMappings.value(name)); return true; }
+    if(m_mode == Mode::Normal && mapping == ",xf")
+    { if(auto* action = m_editor->window()->findChild<QAction*>("actionSqlOpenFile")) action->trigger(); return true; }
+    if((m_mode == Mode::Visual || m_mode == Mode::VisualLine) && (mapping == ";h" || mapping == ";q"))
+    {
+        if(!m_editor->isReadOnly())
+        {
+            int first = int(m_editor->SendScintilla(QsciScintillaBase::SCI_LINEFROMPOSITION, std::min(m_visualAnchor, m_visualCaret)));
+            int last = int(m_editor->SendScintilla(QsciScintillaBase::SCI_LINEFROMPOSITION, std::max(m_visualAnchor, m_visualCaret)));
+            for(int line = last; line >= first; --line)
+            {
+                int start = positionFromLine(line), end = lineEndPosition(line);
+                QString value = QString::fromUtf8(m_editor->text().toUtf8().mid(start, end-start));
+                if(mapping == ";h")
+                {
+                    const auto match = QRegularExpression("^(\\s*)\\+ '([^']+)',*\\s*$").match(value);
+                    if(!match.hasMatch()) continue;
+                    value = match.captured(1)+match.captured(2);
+                }
+                else
+                {
+                    int indent = 0; while(indent < value.size() && value.at(indent).isSpace()) ++indent;
+                    value = value.left(indent)+"+ '"+value.mid(indent).trimmed()+"'";
+                }
+                setSelection(start, end); m_editor->replaceSelectedText(value);
+            }
+            setPosition(positionFromLine(first));
+        }
+        setMode(Mode::Normal); return true;
+    }
     if(m_mode == Mode::Normal && mapping == ",xm") { promptCommand(); return true; }
     if(m_mode == Mode::Normal && (mapping == "zz" || mapping == "zt" || mapping == "zb"))
     {
@@ -498,6 +527,7 @@ bool VimInputHandler::handleNormalKey(QKeyEvent* event)
     }
     if(key == "o" || key == "O")
     {
+        m_repeatNewline = true;
         if(m_editor->isReadOnly())
             return true;
 
@@ -786,7 +816,25 @@ bool VimInputHandler::handleVisualKey(QKeyEvent* event)
 void VimInputHandler::setMode(Mode mode)
 {
     if(m_mode == Mode::Insert && mode == Mode::Normal)
-    { finishBlockInsert(); m_replace = false; m_editor->setOverwriteMode(false); }
+    {
+        finishBlockInsert(); m_replace = false; m_editor->setOverwriteMode(false);
+        if(m_insertRepeat > 1 && !m_editor->isReadOnly())
+        {
+            const QByteArray before = m_insertBefore.toUtf8(), after = m_editor->text().toUtf8();
+            const int length = after.size()-before.size();
+            if(length > 0 && after.left(m_insertStart) == before.left(m_insertStart) &&
+               after.mid(m_insertStart+length) == before.mid(m_insertStart))
+            {
+                QString value = QString::fromUtf8(after.mid(m_insertStart, length));
+                if(m_repeatNewline) value.prepend(endOfLine());
+                setPosition(m_insertStart+length); m_editor->replaceSelectedText(value.repeated(m_insertRepeat-1));
+                setPosition(positionBefore(currentPosition()));
+            }
+        }
+        m_insertRepeat = 1; m_repeatNewline = false;
+    }
+    if(m_mode != Mode::Insert && mode == Mode::Insert)
+    { m_insertRepeat = takeCount(); m_insertStart = currentPosition(); m_insertBefore = m_editor->text(); }
     if(m_mode == mode)
     {
         emit modeChanged();

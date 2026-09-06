@@ -547,3 +547,25 @@ void TestVimInputHandler::findRepeatAndMarks()
     QTest::keyClicks(&editor, "G"); QTest::keyClick(&editor, Qt::Key_O, Qt::ControlModifier);
     QCOMPARE(int(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS)), 2);
 }
+
+
+void TestVimInputHandler::countedInsert()
+{
+    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor); handler.setEnabled(true);
+    QTest::keyClicks(&editor, "3iabc"); QTest::keyClick(&editor, Qt::Key_Escape);
+    QCOMPARE(editor.text(), QString("abcabcabc"));
+    QTest::keyClicks(&editor, "."); QCOMPARE(editor.text(), QString("abcabcababcabcabcc"));
+    QTest::keyClicks(&editor, "2u"); QCOMPARE(editor.text(), QString());
+}
+
+void TestVimInputHandler::numericAndSqlMappings()
+{
+    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    editor.setText("LIMIT 10"); editor.setCursorPosition(0, 0); handler.setEnabled(true);
+    QTest::keyClicks(&editor, "2"); QTest::keyClick(&editor, Qt::Key_A, Qt::ControlModifier);
+    QCOMPARE(editor.text(), QString("LIMIT 12"));
+    QTest::keyClick(&editor, Qt::Key_X, Qt::ControlModifier); QCOMPARE(editor.text(), QString("LIMIT 11"));
+    editor.setText("  one\n  two"); editor.setCursorPosition(0, 0);
+    QTest::keyClicks(&editor, "Vj;q"); QCOMPARE(editor.text(), QString("  + 'one'\n  + 'two'"));
+    editor.setCursorPosition(0, 0); QTest::keyClicks(&editor, "Vj;h"); QCOMPARE(editor.text(), QString("  one\n  two"));
+}

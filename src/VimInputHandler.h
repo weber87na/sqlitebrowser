@@ -142,6 +142,9 @@ private:
     int m_savedAnchor = 0, m_savedCaret = 0;
     Mode m_savedVisualMode = Mode::Visual;
     bool m_replace = false;
+    int m_insertRepeat = 1, m_insertStart = 0;
+    QString m_insertBefore;
+    bool m_repeatNewline = false;
 
     QsciScintilla* m_editor;
     bool m_enabled;
