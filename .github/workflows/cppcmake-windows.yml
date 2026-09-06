@@ -315,7 +315,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: vim-neovim-${{ github.run_number }}
+          BUILD_SHA: ${{ github.sha }}
         run: |
+          current=$(gh api "repos/$GH_REPO/branches/vim-mode-windows" --jq .commit.sha)
+          if [ "$current" != "$BUILD_SHA" ]; then
+            echo "A newer commit supersedes this build; skip publication."
+            exit 0
+          fi
           mkdir dist
           cp release-files/*.zip dist/
           for archive in dist/*.zip; do unzip -tq "$archive"; done

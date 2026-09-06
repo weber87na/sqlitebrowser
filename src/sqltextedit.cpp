@@ -73,6 +73,9 @@ SqlTextEdit::SqlTextEdit(QWidget* parent) :
     connect(m_nvimInputHandler, &NvimInputHandler::saveRequested, this, [this]() {
         if(QAction* save = window()->findChild<QAction*>(QStringLiteral("actionSqlSaveFile"))) save->trigger();
     });
+    connect(m_nvimInputHandler, &NvimInputHandler::executeRequested, this, [this]() {
+        if(QAction* execute = window()->findChild<QAction*>(QStringLiteral("actionExecuteSql"))) execute->trigger();
+    });
     connect(m_nvimInputHandler, &NvimInputHandler::failed, this, [this](const QString& message) {
         m_vimModeIndicator->setToolTip(message);
         // Text remains in the SQL editor if the native process is unavailable.

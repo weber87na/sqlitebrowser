@@ -31,6 +31,7 @@ signals:
     void statusChanged();
     void failed(const QString& message);
     void saveRequested();
+    void executeRequested();
 protected:
     bool eventFilter(QObject* object, QEvent* event) override;
 private:
@@ -38,6 +39,7 @@ private:
     void receive();
     void notification(const QString& method, const QVariantList& args);
     void snapshot();
+    void flushAction(bool execute);
     void applySnapshot(const QVariantMap& data);
     void synchronize();
     void resize();

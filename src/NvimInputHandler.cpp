@@ -33,6 +33,7 @@ NvimInputHandler::NvimInputHandler(QsciScintilla* editor, QObject* parent) : QOb
     });
     // Installed after the legacy handler, so native input takes precedence.
     m_editor->installEventFilter(this);
+    m_editor->viewport()->installEventFilter(this);
 }
 NvimInputHandler::~NvimInputHandler() { stop(); }
 QString NvimInputHandler::executablePath()
@@ -127,9 +128,7 @@ void NvimInputHandler::notification(const QString& method, const QVariantList& a
     } else if(method == "db4s_save") {
         // Flush native edits before Save reads the SQL widget, even when :w is
         // part of the same input burst as the change.
-        lua("return _G.db4s_snapshot(-1,-1)", {}, [this](const QVariant& value, const QVariant& error) {
-            if(!error.isValid()) { applySnapshot(value.toMap()); emit saveRequested(); }
-        });
+        flushAction(false);
     }
     else if(method == "db4s_error") { m_message = args.value(0).toString(); m_status = m_message; emit statusChanged(); }
     else if(method == "redraw") {
@@ -150,6 +149,17 @@ void NvimInputHandler::notification(const QString& method, const QVariantList& a
         }
         if(!m_commandLine.isEmpty()) { m_status = m_commandLine; emit statusChanged(); }
     }
+}
+void NvimInputHandler::flushAction(bool execute)
+{
+    if(!m_ready) return;
+    synchronize();
+    lua("return _G.db4s_snapshot(-1,-1)", {}, [this,execute](const QVariant& value, const QVariant& error) {
+        if(!error.isValid()) {
+            applySnapshot(value.toMap());
+            if(execute) emit executeRequested(); else emit saveRequested();
+        }
+    });
 }
 void NvimInputHandler::synchronize()
 {
@@ -319,13 +329,17 @@ QString NvimInputHandler::keyNotation(QKeyEvent* key) const
 }
 bool NvimInputHandler::eventFilter(QObject* object, QEvent* event)
 {
-    if(object != m_editor || !isActive()) return false;
+    if((object != m_editor && object != m_editor->viewport()) || !isActive()) return false;
     if(event->type() == QEvent::Resize) { QTimer::singleShot(0,this,&NvimInputHandler::resize); return false; }
     if(event->type() == QEvent::ShortcutOverride || event->type() == QEvent::KeyPress) {
         auto* key = static_cast<QKeyEvent*>(event);
-        // Keep SQL execution/save actions reachable. Other Ctrl keys belong to Vim.
+        // Flush pending native input before the application reads SQL text.
         if(key->modifiers().testFlag(Qt::ControlModifier) &&
-            (key->key()==Qt::Key_Return || key->key()==Qt::Key_Enter || key->key()==Qt::Key_S)) return false;
+            (key->key()==Qt::Key_Return || key->key()==Qt::Key_Enter || key->key()==Qt::Key_S)) {
+            if(event->type()==QEvent::ShortcutOverride) key->accept();
+            else flushAction(key->key()!=Qt::Key_S);
+            return true;
+        }
         const QString notation = keyNotation(key);
         if(notation.isEmpty()) return false;
         if(event->type()==QEvent::ShortcutOverride) { key->accept(); return true; }
@@ -341,7 +355,19 @@ bool NvimInputHandler::eventFilter(QObject* object, QEvent* event)
             const int p=int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS));
             const int line=int(m_editor->SendScintilla(QsciScintillaBase::SCI_LINEFROMPOSITION,p));
             const int col=p-position(line,0);
-            lua("pcall(vim.api.nvim_win_set_cursor,0,{...})",{line+1,col});
+            const int a=int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETSELECTIONSTART));
+            const int end=int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETSELECTIONEND));
+            if(end>a) {
+                const int b=int(m_editor->SendScintilla(QsciScintillaBase::SCI_POSITIONBEFORE,end));
+                const int al=int(m_editor->SendScintilla(QsciScintillaBase::SCI_LINEFROMPOSITION,a));
+                const int bl=int(m_editor->SendScintilla(QsciScintillaBase::SCI_LINEFROMPOSITION,b));
+                lua("local al,ac,bl,bc=...; vim.cmd('normal! '..string.char(27)); "
+                    "vim.api.nvim_win_set_cursor(0,{al,ac}); vim.cmd('normal! v'); "
+                    "vim.api.nvim_win_set_cursor(0,{bl,bc})",{al+1,a-position(al,0),bl+1,b-position(bl,0)});
+            } else {
+                lua("vim.cmd('normal! '..string.char(27)); pcall(vim.api.nvim_win_set_cursor,0,{...})",{line+1,col});
+            }
+            m_lastCaret = p;
         });
     }
     return false;
