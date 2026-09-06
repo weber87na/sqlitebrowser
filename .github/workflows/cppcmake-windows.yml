@@ -1,6 +1,16 @@
 name: Build (Windows)
 
 on:
+  push:
+    branches: [vim-mode-windows]
+    paths:
+      - src/VimInputHandler.*
+      - src/Nvim*
+      - src/vim/**
+      - src/sqltextedit.*
+      - src/tests/TestNvimInputHandler.cpp
+      - src/tests/TestVimInputHandler.*
+      - src/tests/vim-standalone/**
   workflow_call:
     inputs:
       NIGHTLY:
@@ -12,7 +22,15 @@ on:
   workflow_dispatch:
 
 jobs:
+  vim-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: sudo apt-get update && sudo apt-get install -y qtbase5-dev libqscintilla2-qt5-dev
+      - run: cmake -S src/tests/vim-standalone -B vim-tests && cmake --build vim-tests
+      - run: ctest --test-dir vim-tests --output-on-failure
   build:
+    needs: vim-tests
     name: ${{ matrix.os }}-${{ matrix.arch }}
     runs-on: ${{ matrix.os }}
     permissions:
@@ -164,6 +182,7 @@ jobs:
       # Change the signing-policy-slug when you release an RC, RTM or stable release.
       - if: github.event_name != 'pull_request'
         name: Code signing with SignPath
+        continue-on-error: true
         uses: signpath/github-action-submit-signing-request@v2
         with:
           api-token: "${{ secrets.SIGNPATH_API_TOKEN }}"
@@ -189,6 +208,7 @@ jobs:
           } else {
             move target\System64\* "target\DB Browser for SQLite\"
           }
+          Copy-Item doc\vim-builtin.md "target\DB Browser for SQLite\VIM-README.md"
           Compress-Archive -Path "target\DB Browser for SQLite\*" -DestinationPath $FILENAME_FORMAT
 
       - if: github.event_name != 'pull_request'
@@ -264,3 +284,42 @@ jobs:
       actions: read
       contents: write
     uses: ./.github/workflows/release.yml
+
+  publish-builtin-prerelease:
+    if: github.event_name == 'push' && github.repository == 'weber87na/sqlitebrowser'
+    needs: [vim-tests, build]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: build-artifacts-win-*
+          path: release-files
+          merge-multiple: true
+      - name: Publish verified portable ZIPs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: vim-builtin-${{ github.run_number }}
+          BUILD_SHA: ${{ github.sha }}
+        run: |
+          current=$(gh api "repos/$GH_REPO/branches/vim-mode-windows" --jq .commit.sha)
+          if [ "$current" != "$BUILD_SHA" ]; then
+            echo "A newer commit supersedes this build; skip publication."
+            exit 0
+          fi
+          mkdir dist
+          cp release-files/*.zip dist/
+          for archive in dist/*.zip; do unzip -tq "$archive"; done
+          (cd dist && sha256sum *.zip > SHA256SUMS.txt)
+          cat > notes.md <<'NOTES'
+          Windows x64／x86 使用相同的內建 Vim 引擎，不需要安裝 Neovim，也不讀取 init.lua。
+
+          加強 J/gJ、重複操作、巨集、暫存器、字元跳轉、縮排與大小寫編輯。
+          保留逗號 leader、zh/zl/z;/z,、surround、Dracula 與字體設定。
+          ZIP 內附 VIM-README.md 繁體中文操作說明，列出支援範圍與限制。
+          此版本通過內建 Vim 回歸測試後才進行 Windows 編譯。
+          NOTES
+          gh release create "$RELEASE_TAG" --target vim-mode-windows --title "內建 Vim 免安裝版 ($RELEASE_TAG)" --prerelease --notes-file notes.md dist/*.zip dist/SHA256SUMS.txt

@@ -1,0 +1,5 @@
+<RCC>
+  <qresource prefix="dracula">
+    <file>dracula.qss</file>
+  </qresource>
+</RCC>

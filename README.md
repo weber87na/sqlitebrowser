@@ -17,6 +17,7 @@
 - [DB Browser for SQLite](#db-browser-for-sqlite)
   - [Table of Contents](#table-of-contents)
   - [What it is](#what-it-is)
+  - [Vim editing mode](#vim-editing-mode)
   - [What it is not](#what-it-is-not)
   - [Wiki](#wiki)
   - [Continuous, Nightly builds](#continuous-nightly-builds)
@@ -70,6 +71,15 @@ Controls and wizards are available for users to:
 * Issue SQL queries and inspect the results
 * Examine a log of all SQL commands issued by the application
 * Plot simple graphs based on table or query data
+
+## Vim editing mode
+
+請參閱 [繁體中文操作說明](doc/vim-builtin.md)，包含常用指令、surround、巨集、
+暫存器、搜尋與取代、矩形選取及 `vim.json` 設定。
+
+在「編輯 → 偏好設定 → SQL」勾選 **Vim editing mode**。
+Windows x64／x86 均使用直接整合於程式的內建引擎，不需要 Neovim 或 init.lua。
+預設保留逗號 leader、`zh/zl/z;/z,` 等操作習慣。
 
 ## What it is not
 

@@ -186,12 +186,6 @@ void MainWindow::init()
     QShortcut* shortcutPrint = new QShortcut(QKeySequence(QKeySequence::Print), ui->dbTreeWidget, nullptr, nullptr, Qt::WidgetShortcut);
     connect(shortcutPrint, &QShortcut::activated, this, &MainWindow::printDbStructure);
 
-    QShortcut* closeTabShortcut = new QShortcut(tr("Ctrl+W"), ui->tabSqlAreas, nullptr, nullptr, Qt::WidgetWithChildrenShortcut);
-    connect(closeTabShortcut, &QShortcut::activated, this, [this]() {
-        if(ui->tabSqlAreas->currentIndex() >= 0)
-          closeSqlTab(ui->tabSqlAreas->currentIndex());
-    });
-
     // Shortcuts for advancing and going back in the SQL Execution area tabs, independently of the widget which has focus.
     // This emulates the shortcuts provided by QTabWidget.
     QShortcut* shortcutNextTab = new QShortcut(QKeySequence(tr("Ctrl+Tab")), ui->tabSqlAreas, nullptr, nullptr, Qt::WidgetWithChildrenShortcut);
@@ -2430,7 +2424,10 @@ void MainWindow::reloadSettings()
         break;
     case Settings::DarkStyle :
     case Settings::LightStyle :
-        QFile f(style == Settings::DarkStyle ? ":qdarkstyle/dark/darkstyle.qss" : ":qdarkstyle/light/lightstyle.qss");
+    case Settings::DraculaStyle :
+        QFile f(style == Settings::DarkStyle ? ":qdarkstyle/dark/darkstyle.qss" :
+                style == Settings::LightStyle ? ":qdarkstyle/light/lightstyle.qss" :
+                                                ":dracula/dracula.qss");
         if (!f.exists()) {
             QMessageBox::warning(this, qApp->applicationName(),
                                tr("Could not find resource file: %1").arg(f.fileName()));
@@ -2454,7 +2451,7 @@ void MainWindow::reloadSettings()
         qobject_cast<SqlExecutionArea*>(ui->tabSqlAreas->widget(i))->reloadSettings();
 
     // Prepare log font
-    QFont logfont("Monospace");
+    QFont logfont(Settings::getValue("log", "font").toString());
     logfont.setStyleHint(QFont::TypeWriter);
     logfont.setPointSize(Settings::getValue("log", "fontsize").toInt());
 
@@ -2465,6 +2462,20 @@ void MainWindow::reloadSettings()
     ui->editLogApplication->setFont(logfont);
     ui->editLogUser->setFont(logfont);
     ui->editLogErrorLog->setFont(logfont);
+    // With a lexer, setFont alone does not update styled SQL text.
+    const QList<ExtendedScintilla*> logs = {
+        ui->editLogApplication, ui->editLogUser, ui->editLogErrorLog};
+    for(auto* log : logs)
+    {
+        log->setMarginsFont(logfont);
+        // SQL lexers are shared with editors: modify only this view's styles.
+        const QByteArray family = logfont.family().toUtf8();
+        for(int style = 0; style <= 255; ++style)
+        {
+            log->SendScintilla(QsciScintillaBase::SCI_STYLESETFONT, style, family.constData());
+            log->SendScintilla(QsciScintillaBase::SCI_STYLESETSIZE, style, logfont.pointSize());
+        }
+    }
     editDock->reloadSettings();
 
     // Set font for database structure views
@@ -3895,7 +3906,6 @@ void MainWindow::showContextMenuSqlTabBar(const QPoint& pos)
 
     QAction* actionClose = new QAction(this);
     actionClose->setText(tr("Close Tab"));
-    actionClose->setShortcut(tr("Ctrl+W"));
     connect(actionClose, &QAction::triggered, this, [this, tab]() {
         closeSqlTab(tab);
     });

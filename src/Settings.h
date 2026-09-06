@@ -2,6 +2,7 @@
 #define SETTINGS_H
 
 #include <unordered_map>
+#include <QFont>
 #include <QSettings>
 #include <QVariant>
 
@@ -13,7 +14,8 @@ public:
     enum AppStyle {
         FollowDesktopStyle,
         DarkStyle,
-        LightStyle
+        LightStyle,
+        DraculaStyle
     };
 
     static void setUserSettingsFile(const QString& userSettingsFileArg);
@@ -22,7 +24,11 @@ public:
     static void clearValue(const std::string& group, const std::string& name);
     static void restoreDefaults();
 
-    static void rememberDefaultFontSize(int size) { m_defaultFontSize = size; }
+    static void rememberDefaultFont(const QFont& font)
+    {
+        m_defaultFontFamily = font.family();
+        m_defaultFontSize = font.pointSize();
+    }
     static void exportSettings(const QString& fileName);
     static bool importSettings(const QString& fileName);
     static void sync();
@@ -54,6 +60,9 @@ private:
 
     // Default UI font size
     static int m_defaultFontSize;
+
+    // Default UI font family
+    static QString m_defaultFontFamily;
 };
 
 #endif

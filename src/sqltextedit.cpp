@@ -2,17 +2,24 @@
 #include "sqltextedit.h"
 #include "Settings.h"
 #include "SqlUiLexer.h"
+#include "VimInputHandler.h"
+#include <QAction>
+#include <algorithm>
 
 #include <Qsci/qscicommandset.h>
 #include <Qsci/qscicommand.h>
 
 #include <QShortcut>
 #include <QRegularExpression>
+#include <QLabel>
+#include <QResizeEvent>
 
 SqlUiLexer* SqlTextEdit::sqlLexer = nullptr;
 
 SqlTextEdit::SqlTextEdit(QWidget* parent) :
-    ExtendedScintilla(parent)
+    ExtendedScintilla(parent),
+    m_vimInputHandler(new VimInputHandler(this, this)),
+    m_vimModeIndicator(new QLabel(this))
 {
     // Create lexer object if not done yet
     if(sqlLexer == nullptr)
@@ -53,6 +60,13 @@ SqlTextEdit::SqlTextEdit(QWidget* parent) :
     QShortcut* shortcutToggleComment = new QShortcut(QKeySequence(tr("Ctrl+/")), this, nullptr, nullptr, Qt::WidgetShortcut);
     connect(shortcutToggleComment, &QShortcut::activated, this, &SqlTextEdit::toggleBlockComment);
 
+    m_vimModeIndicator->setAutoFillBackground(true);
+    m_vimModeIndicator->setFrameStyle(QFrame::StyledPanel | QFrame::Plain);
+    m_vimModeIndicator->setMargin(3);
+    m_vimModeIndicator->setAttribute(Qt::WA_TransparentForMouseEvents);
+    m_vimModeIndicator->hide();
+    connect(m_vimInputHandler, &VimInputHandler::modeChanged, this, &SqlTextEdit::updateVimModeIndicator);
+
     // Do rest of initialisation
     reloadSettings();
 }
@@ -71,6 +85,10 @@ void SqlTextEdit::reloadSettings()
     }
     // Set wrap lines
     setWrapMode(static_cast<QsciScintilla::WrapMode>(Settings::getValue("editor", "wrap_lines").toInt()));
+
+    const bool vim = Settings::getValue("editor", "vim_mode").toBool();
+    m_vimInputHandler->setEnabled(vim);
+    updateVimModeIndicator();
 
     ExtendedScintilla::reloadSettings();
 
@@ -98,6 +116,48 @@ void SqlTextEdit::reloadSettings()
     }
     setupSyntaxHighlightingFormat(sqlLexer, "identifier", QsciLexerSQL::Identifier);
     setupSyntaxHighlightingFormat(sqlLexer, "identifier", QsciLexerSQL::QuotedIdentifier);
+}
+
+void SqlTextEdit::resizeEvent(QResizeEvent* event)
+{
+    ExtendedScintilla::resizeEvent(event);
+    if(m_vimModeIndicator->isVisible())
+        m_vimModeIndicator->move(width() - m_vimModeIndicator->width() - 8,
+                                 height() - m_vimModeIndicator->height() - 8);
+}
+
+void SqlTextEdit::updateVimModeIndicator()
+{
+    if(!m_vimInputHandler->isEnabled())
+    {
+        m_vimModeIndicator->hide();
+        return;
+    }
+
+    switch(m_vimInputHandler->mode())
+    {
+    case VimInputHandler::Mode::Normal:
+        m_vimModeIndicator->setText(tr("-- NORMAL --"));
+        break;
+    case VimInputHandler::Mode::Insert:
+        m_vimModeIndicator->setText(tr("-- INSERT --"));
+        break;
+    case VimInputHandler::Mode::Visual:
+        m_vimModeIndicator->setText(tr("-- VISUAL --"));
+        break;
+    case VimInputHandler::Mode::VisualBlock:
+        m_vimModeIndicator->setText(QString::fromUtf8("-- 矩形選取 --"));
+        break;
+    case VimInputHandler::Mode::VisualLine:
+        m_vimModeIndicator->setText(tr("-- VISUAL LINE --"));
+        break;
+    }
+
+    m_vimModeIndicator->adjustSize();
+    m_vimModeIndicator->move(width() - m_vimModeIndicator->width() - 8,
+                             height() - m_vimModeIndicator->height() - 8);
+    m_vimModeIndicator->show();
+    m_vimModeIndicator->raise();
 }
 
 

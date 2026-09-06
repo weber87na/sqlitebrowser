@@ -8,6 +8,7 @@
 
 #include <QDir>
 #include <QColorDialog>
+#include <QFont>
 #include <QMessageBox>
 #include <QKeyEvent>
 #include <QStandardPaths>
@@ -152,12 +153,17 @@ void PreferencesDialog::loadSettings()
     // Gracefully handle the preferred Editor font not being available
     matchingFont = ui->comboEditorFont->findText(Settings::getValue("editor", "font").toString(), Qt::MatchExactly);
     if (matchingFont == -1)
-        matchingFont = ui->comboDataBrowserFont->findText(Settings::getDefaultValue("editor", "font").toString());
+        matchingFont = ui->comboEditorFont->findText(Settings::getDefaultValue("editor", "font").toString());
     ui->comboEditorFont->setCurrentIndex(matchingFont);
 
     ui->spinEditorFontSize->setValue(Settings::getValue("editor", "fontsize").toInt());
     ui->spinTabSize->setValue(Settings::getValue("editor", "tabsize").toInt());
     ui->checkIndentationUseTabs->setChecked(Settings::getValue("editor", "indentation_use_tabs").toBool());
+
+    matchingFont = ui->comboLogFont->findText(Settings::getValue("log", "font").toString(), Qt::MatchExactly);
+    if (matchingFont == -1)
+        matchingFont = ui->comboLogFont->findText(Settings::getDefaultValue("log", "font").toString());
+    ui->comboLogFont->setCurrentIndex(matchingFont);
     ui->spinLogFontSize->setValue(Settings::getValue("log", "fontsize").toInt());
     ui->wrapComboBox->setCurrentIndex(Settings::getValue("editor", "wrap_lines").toInt());
     ui->quoteComboBox->setCurrentIndex(Settings::getValue("editor", "identifier_quotes").toInt());
@@ -167,6 +173,7 @@ void PreferencesDialog::loadSettings()
     ui->checkErrorIndicators->setChecked(Settings::getValue("editor", "error_indicators").toBool());
     ui->checkHorizontalTiling->setChecked(Settings::getValue("editor", "horizontal_tiling").toBool());
     ui->checkCloseButtonOnTabs->setChecked(Settings::getValue("editor", "close_button_on_tabs").toBool());
+    ui->checkVimMode->setChecked(Settings::getValue("editor", "vim_mode").toBool());
 
     ui->listExtensions->addItems(Settings::getValue("extensions", "list").toStringList());
     for (int i=0;i<ui->listBuiltinExtensions->count();++i)
@@ -183,6 +190,7 @@ void PreferencesDialog::loadSettings()
     ui->toolbarStyleComboBrowse->setCurrentIndex(Settings::getValue("General", "toolbarStyleBrowse").toInt());
     ui->toolbarStyleComboSql->setCurrentIndex(Settings::getValue("General", "toolbarStyleSql").toInt());
     ui->toolbarStyleComboEditCell->setCurrentIndex(Settings::getValue("General", "toolbarStyleEditCell").toInt());
+    ui->comboGeneralFont->setCurrentFont(QFont(Settings::getValue("General", "font").toString()));
     ui->spinGeneralFontSize->setValue(Settings::getValue("General", "fontsize").toInt());
     ui->spinMaxRecentFiles->setValue(Settings::getValue("General", "maxRecentFiles").toInt());
 }
@@ -236,6 +244,7 @@ void PreferencesDialog::saveSettings(bool accept)
     Settings::setValue("editor", "fontsize", ui->spinEditorFontSize->value());
     Settings::setValue("editor", "tabsize", ui->spinTabSize->value());
     Settings::setValue("editor", "indentation_use_tabs", ui->checkIndentationUseTabs->isChecked());
+    Settings::setValue("log", "font", ui->comboLogFont->currentText());
     Settings::setValue("log", "fontsize", ui->spinLogFontSize->value());
     Settings::setValue("editor", "wrap_lines", ui->wrapComboBox->currentIndex());
     Settings::setValue("editor", "identifier_quotes", ui->quoteComboBox->currentIndex());
@@ -244,6 +253,7 @@ void PreferencesDialog::saveSettings(bool accept)
     Settings::setValue("editor", "error_indicators", ui->checkErrorIndicators->isChecked());
     Settings::setValue("editor", "horizontal_tiling", ui->checkHorizontalTiling->isChecked());
     Settings::setValue("editor", "close_button_on_tabs", ui->checkCloseButtonOnTabs->isChecked());
+    Settings::setValue("editor", "vim_mode", ui->checkVimMode->isChecked());
 
     QStringList extList;
     for(int i=0;i<ui->listExtensions->count();++i)
@@ -271,6 +281,7 @@ void PreferencesDialog::saveSettings(bool accept)
     Settings::setValue("General", "toolbarStyleSql", ui->toolbarStyleComboSql->currentIndex());
     Settings::setValue("General", "toolbarStyleEditCell", ui->toolbarStyleComboEditCell->currentIndex());
     Settings::setValue("General", "DBFileExtensions", m_dbFileExtensions.join(";;") );
+    Settings::setValue("General", "font", ui->comboGeneralFont->currentFont().family());
     Settings::setValue("General", "fontsize", ui->spinGeneralFontSize->value());
     Settings::setValue("General", "maxRecentFiles", ui->spinMaxRecentFiles->value());
     Settings::setValue("General", "recentfileshortcuts", ui->checkRecentFileShortcuts->isChecked());

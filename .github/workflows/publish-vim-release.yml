@@ -1,0 +1,35 @@
+name: Publish Vim Dracula Release
+on:
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      BUILD_RUN_ID: "33952153806"
+      BUILD_SHA: "74b4d98610629974ea7c0b97723d91c60d790dad"
+      RELEASE_TAG: vim-dracula-v3
+    steps:
+      - name: Require successful build and regression tests
+        run: |
+          gh run watch "$BUILD_RUN_ID" --exit-status --interval 30
+          test "$(gh run view "$BUILD_RUN_ID" --json headSha --jq .headSha)" = "$BUILD_SHA"
+      - name: Download verified build
+        run: |
+          mkdir -p artifacts/x64 artifacts/x86 dist
+          gh run download "$BUILD_RUN_ID" --name build-artifacts-win-x64 --dir artifacts/x64
+          gh run download "$BUILD_RUN_ID" --name build-artifacts-win-x86 --dir artifacts/x86
+          cp artifacts/x64/DB.Browser.for.SQLite-dev-74b4d98-win-x64.zip dist/DB-Browser-for-SQLite-Vim-Dracula-v3-Windows-x64-portable.zip
+          cp artifacts/x86/DB.Browser.for.SQLite-dev-74b4d98-win-x86.zip dist/DB-Browser-for-SQLite-Vim-Dracula-v3-Windows-x86-portable.zip
+          unzip -tq dist/*x64*.zip
+          unzip -tq dist/*x86*.zip
+          cd dist
+          sha256sum *.zip > SHA256SUMS.txt
+      - name: Publish prerelease
+        run: |
+          gh release create "$RELEASE_TAG" --target "$BUILD_SHA" --title "DB Browser for SQLite Vim + Dracula v3" --prerelease --notes "Adds W/B/E word motions and fixes punctuation movement, Escape caret position, repeated ^, rz mapping conflicts, pending Insert text, counted undo and join counts. Registers Traditional Chinese font fallbacks for Consolas/Fira Code and fixes SQL Log fonts without changing the shared editor lexer. Linux Vim regression tests must pass before Windows builds. Windows visual font appearance still requires user verification; full Neovim/init.lua is not supported." dist/*.zip dist/SHA256SUMS.txt

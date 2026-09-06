@@ -146,6 +146,10 @@ void ExtendedScintilla::reloadCommonSettings()
         setMarginsBackgroundColor(QColor(0xC9, 0xCD, 0xD0));
         setMarginsForegroundColor(QColor(0x00, 0x00, 0x00));
         break;
+    case Settings::DraculaStyle :
+        setMarginsBackgroundColor(QColor(0x44, 0x47, 0x5A));
+        setMarginsForegroundColor(QColor(0xF8, 0xF8, 0xF2));
+        break;
     }
     // Reuse color of current line background in fold margin.
     QColor currentLineColor (Settings::getValue("syntaxhighlighter", "currentline_colour").toString());

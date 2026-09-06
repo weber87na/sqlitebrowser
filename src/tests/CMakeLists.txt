@@ -81,3 +81,25 @@ set(TESTCACHE_HDR
 add_executable(test-cache ${TESTCACHE_HDR} ${TESTCACHE_SRC})
 target_link_libraries(test-cache ${QT_MAJOR}::Test)
 add_test(NAME test-cache COMMAND $<TARGET_FILE:test-cache>)
+
+# test Vim input handler
+
+set(TESTVIMINPUT_SRC
+    TestVimInputHandler.cpp
+    ../VimInputHandler.cpp
+)
+
+set(TESTVIMINPUT_HDR
+    TestVimInputHandler.h
+    ../VimInputHandler.h
+)
+
+add_executable(test-vim-input ${TESTVIMINPUT_HDR} ${TESTVIMINPUT_SRC})
+target_link_libraries(test-vim-input ${QT_MAJOR}::Test ${QT_MAJOR}::Widgets QScintilla::QScintilla)
+
+if(NOT WIN32)
+    add_test(NAME test-vim-input COMMAND $<TARGET_FILE:test-vim-input> -v1)
+    if(UNIX AND NOT APPLE)
+        set_tests_properties(test-vim-input PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    endif()
+endif()

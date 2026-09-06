@@ -107,6 +107,48 @@ Application::Application(int& argc, char** argv) :
     setOrganizationName("sqlitebrowser");
     setApplicationName("DB Browser for SQLite");
 
+    // Latin coding fonts have no CJK glyphs. Register explicit Traditional
+    // Chinese fallbacks before constructing any editor or UI fonts.
+    const QStringList cjkFallbacks = QStringList()
+        << "Microsoft JhengHei UI" << "Microsoft JhengHei"
+        << "Noto Sans CJK TC" << "Noto Sans TC" << "PingFang TC";
+    QFont::insertSubstitutions("Consolas", cjkFallbacks);
+    QFont::insertSubstitutions("Fira Code", QStringList("Consolas") + cjkFallbacks);
+
+    // Existing installations keep their QSettings when a portable build is
+    // replaced. Apply the requested Vim/Dracula defaults once, then leave all
+    // later user changes untouched.
+    if(!Settings::getValue("General", "vimDraculaDefaultsApplied").toBool())
+    {
+        Settings::setValue("General", "appStyle", static_cast<int>(Settings::DraculaStyle));
+        Settings::setValue("General", "font", QStringLiteral("Consolas"));
+        Settings::setValue("databrowser", "font", QStringLiteral("Consolas"));
+        Settings::setValue("editor", "font", QStringLiteral("Consolas"));
+        Settings::setValue("log", "font", QStringLiteral("Consolas"));
+
+        const QStringList dataBrowserColours = {
+            QStringLiteral("null_fg_colour"), QStringLiteral("null_bg_colour"),
+            QStringLiteral("reg_fg_colour"), QStringLiteral("reg_bg_colour"),
+            QStringLiteral("formatted_fg_colour"), QStringLiteral("formatted_bg_colour"),
+            QStringLiteral("bin_fg_colour"), QStringLiteral("bin_bg_colour")
+        };
+        for(const QString& name : dataBrowserColours)
+            Settings::clearValue("databrowser", name.toStdString());
+
+        const QStringList syntaxColours = {
+            QStringLiteral("keyword_colour"), QStringLiteral("function_colour"),
+            QStringLiteral("table_colour"), QStringLiteral("comment_colour"),
+            QStringLiteral("identifier_colour"), QStringLiteral("string_colour"),
+            QStringLiteral("currentline_colour"), QStringLiteral("background_colour"),
+            QStringLiteral("foreground_colour"), QStringLiteral("selected_bg_colour"),
+            QStringLiteral("selected_fg_colour"), QStringLiteral("highlight_colour")
+        };
+        for(const QString& name : syntaxColours)
+            Settings::clearValue("syntaxhighlighter", name.toStdString());
+
+        Settings::setValue("General", "vimDraculaDefaultsApplied", true);
+    }
+
     // Set character encoding to UTF8
     QTextCodec::setCodecForLocale(QTextCodec::codecForName("UTF-8"));
 
@@ -160,8 +202,8 @@ Application::Application(int& argc, char** argv) :
     // See https://bugreports.qt.io/browse/QTBUG-40332
     qputenv("QT_BEARER_POLL_TIMEOUT", QByteArray::number(INT_MAX));
 
-    // Remember default font size
-    Settings::rememberDefaultFontSize(font().pointSize());
+    // Remember the desktop default font before applying user settings
+    Settings::rememberDefaultFont(font());
 
     // Parse command line
     QString fileToOpen;
@@ -383,6 +425,11 @@ void Application::reloadSettings()
 
     // Font settings
     QFont f = font();
+    f.setFamily(Settings::getValue("General", "font").toString());
+#if QT_VERSION >= QT_VERSION_CHECK(5, 13, 0)
+    f.setFamilies(QStringList() << f.family() << "Microsoft JhengHei UI"
+                  << "Microsoft JhengHei" << "Noto Sans CJK TC" << "Noto Sans TC");
+#endif
     f.setPointSize(Settings::getValue("General", "fontsize").toInt());
     setFont(f);
 }

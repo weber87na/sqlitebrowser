@@ -154,7 +154,7 @@ void SqlExecutionArea::reloadSettings()
     ui->tableResult->reloadSettings();
 
     // Set font
-    QFont logfont(Settings::getValue("editor", "font").toString());
+    QFont logfont(Settings::getValue("log", "font").toString());
     logfont.setStyleHint(QFont::TypeWriter);
     logfont.setPointSize(Settings::getValue("log", "fontsize").toInt());
     ui->editErrors->setFont(logfont);
