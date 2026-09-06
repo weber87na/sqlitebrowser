@@ -119,6 +119,10 @@ bool VimInputHandler::eventFilter(QObject* watched, QEvent* event)
         return QObject::eventFilter(watched, event);
 
     auto* key = static_cast<QKeyEvent*>(event);
+    // Modifier key presses are not Vim commands and must not consume a count.
+    if(key->key() == Qt::Key_Control || key->key() == Qt::Key_Shift ||
+       key->key() == Qt::Key_Alt || key->key() == Qt::Key_Meta || key->key() == Qt::Key_AltGr)
+        return false;
     if(m_mode == Mode::Insert && (key->text().isEmpty() ||
        key->modifiers().testFlag(Qt::ControlModifier)))
         flushInsertMappingPrefix();
