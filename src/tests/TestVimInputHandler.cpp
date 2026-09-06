@@ -7,6 +7,7 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QtTest/QTest>
+#include <QTemporaryFile>
 
 namespace
 {
@@ -503,4 +504,42 @@ void TestVimInputHandler::substitution()
     editor.undo(); QCOMPARE(editor.text(), QString("foo foo\nFOO bar"));
     QVERIFY(!handler.executeCommand("%s/foo/test/c"));
     editor.setReadOnly(true); QVERIFY(!handler.executeCommand("%s/foo/test/g"));
+}
+
+
+void TestVimInputHandler::blockEditing()
+{
+    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    editor.setText("abc\ndef\nghi"); editor.setCursorPosition(0, 0); handler.setEnabled(true);
+    QTest::keyClick(&editor, Qt::Key_V, Qt::ControlModifier);
+    QTest::keyClicks(&editor, "jjld"); QCOMPARE(editor.text(), QString("c\nf\ni"));
+    QTest::keyClicks(&editor, "u"); QCOMPARE(editor.text(), QString("abc\ndef\nghi"));
+    editor.setCursorPosition(0, 0);
+    QTest::keyClick(&editor, Qt::Key_V, Qt::ControlModifier); QTest::keyClicks(&editor, "jjI-- ");
+    QTest::keyClick(&editor, Qt::Key_Escape);
+    QCOMPARE(editor.text(), QString("-- abc\n-- def\n-- ghi"));
+    QTest::keyClicks(&editor, "u"); QCOMPARE(editor.text(), QString("abc\ndef\nghi"));
+}
+
+void TestVimInputHandler::configMappings()
+{
+    QTemporaryFile config; QVERIFY(config.open());
+    config.write(R"({"leader":",","timeoutMs":300,"shiftWidth":2,"mappings":{"i:jk":"<Esc>","n:Q":"gUw"}})"); config.flush();
+    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    QVERIFY(handler.loadConfig(config.fileName())); handler.setEnabled(true);
+    QTest::keyClicks(&editor, "iselectjkQ"); QCOMPARE(editor.text(), QString("selecT"));
+    QCOMPARE(handler.mode(), VimInputHandler::Mode::Normal);
+    QCOMPARE(editor.indentationWidth(), 2);
+}
+
+void TestVimInputHandler::findRepeatAndMarks()
+{
+    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    editor.setText("a,b,c,d\nsecond\nthird"); editor.setCursorPosition(0, 0); handler.setEnabled(true);
+    QTest::keyClicks(&editor, "t,;");
+    QCOMPARE(int(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS)), 2);
+    QTest::keyClicks(&editor, "maG`a");
+    QCOMPARE(int(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS)), 2);
+    QTest::keyClicks(&editor, "G"); QTest::keyClick(&editor, Qt::Key_O, Qt::ControlModifier);
+    QCOMPARE(int(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS)), 2);
 }

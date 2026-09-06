@@ -74,18 +74,12 @@ Controls and wizards are available for users to:
 
 ## Vim editing mode
 
-### Vim 中文操作說明
+請參閱 [繁體中文操作說明](doc/vim-builtin.md)，包含常用指令、surround、巨集、
+暫存器、搜尋與取代、矩形選取及 `vim.json` 設定。
 
-請參閱 [完整中文操作說明](doc/vim-builtin.md)，內容包含啟用方式、常用指令、surround、巨集、暫存器、搜尋與取代，以及 `init.lua`／`init.vim` 設定。
-
-程式保留兩種模式：
-
-- **內建基本模式**：不需要 Neovim，支援基本移動、編輯、文字物件與 surround。
-- **Neovim 模式**：使用真正的 Neovim 核心，提供較完整的 Vim 指令與設定檔支援。Windows x64 免安裝 ZIP 已附執行環境。
-
-在「編輯 → 偏好設定 → SQL」勾選 **Vim editing mode**；再勾選 **Full Vim engine** 即使用 Neovim，狀態列會顯示 `NVIM`。取消 Full Vim engine 可回到內建模式。
-
-Vim 功能本身可以直接實作在程式內；Neovim 是目前用來提供較完整相容性的架構選項，並非唯一實作方式。x86 ZIP 未附 Neovim，預設使用內建基本模式。
+在「編輯 → 偏好設定 → SQL」勾選 **Vim editing mode**。
+Windows x64／x86 均使用直接整合於程式的內建引擎，不需要 Neovim 或 init.lua。
+預設保留逗號 leader、`zh/zl/z;/z,` 等操作習慣。
 
 ## What it is not
 

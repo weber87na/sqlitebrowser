@@ -145,6 +145,9 @@ void SqlTextEdit::updateVimModeIndicator()
     case VimInputHandler::Mode::Visual:
         m_vimModeIndicator->setText(tr("-- VISUAL --"));
         break;
+    case VimInputHandler::Mode::VisualBlock:
+        m_vimModeIndicator->setText(QString::fromUtf8("-- 矩形選取 --"));
+        break;
     case VimInputHandler::Mode::VisualLine:
         m_vimModeIndicator->setText(tr("-- VISUAL LINE --"));
         break;

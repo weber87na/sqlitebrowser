@@ -8,6 +8,9 @@ class TestVimInputHandler : public QObject
     Q_OBJECT
 
 private slots:
+    void blockEditing();
+    void configMappings();
+    void findRepeatAndMarks();
     void builtinCommands_data();
     void builtinCommands();
     void repeatAndMacro();

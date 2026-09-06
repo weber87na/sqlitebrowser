@@ -30,7 +30,8 @@ public:
         Normal,
         Insert,
         Visual,
-        VisualLine
+        VisualLine,
+        VisualBlock
     };
     Q_ENUM(Mode)
 
@@ -98,6 +99,14 @@ private:
 
     void enterVisualMode(bool linewise);
     void updateVisualSelection();
+    void finishBlockOperator(const QString& command);
+    void finishBlockInsert();
+    bool m_blockInsert = false;
+    int m_blockFirst = 0, m_blockLast = 0, m_blockColumn = 0, m_blockStart = 0;
+    QString m_blockBefore;
+    bool m_registerBlock = false;
+    QVector<int> m_jumps;
+    int m_jumpIndex = -1;
     void finishVisualOperator(const QString& command);
 
     void promptSearch(bool forward);
