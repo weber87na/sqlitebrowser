@@ -14,7 +14,7 @@ inline void number(QByteArray& out, quint64 n, int size)
 inline QByteArray encode(const QVariant& v)
 {
     QByteArray out;
-    if(!v.isValid() || v.isNull()) return QByteArray(1, char(0xc0));
+    if(!v.isValid()) return QByteArray(1, char(0xc0));
     switch(v.type()) {
     case QVariant::Bool: return QByteArray(1, v.toBool() ? char(0xc3) : char(0xc2));
     case QVariant::Int: case QVariant::UInt: case QVariant::LongLong: case QVariant::ULongLong:

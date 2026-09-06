@@ -21,10 +21,16 @@ private slots:
     void readonly();
     void scrolling();
     void saveBurst();
+    void emptyEditor();
 };
 void TestNvimInputHandler::codec()
 {
     const QVariantList original{0, 42, QString("中文"), QVariantList{true, -1000, QVariantMap{{"key","value"}}}};
+    const auto emptyBytes=NvimMessagePack::encode(QString());
+    NvimMessagePack::Reader emptyReader(emptyBytes);
+    const auto emptyValue=emptyReader.value();
+    QVERIFY(emptyValue.isValid()); QCOMPARE(emptyValue.type(),QVariant::String);
+    QVERIFY(emptyValue.toString().isEmpty());
     const auto bytes=NvimMessagePack::encode(original);
     for(int i=0;i<bytes.size();++i) {
         const auto fragment=bytes.left(i); NvimMessagePack::Reader reader(fragment); reader.value();
@@ -178,6 +184,19 @@ void TestNvimInputHandler::saveBurst()
     QString executed; connect(&nvim,&NvimInputHandler::executeRequested,&editor,[&]() { executed=editor.text(); });
     nvim.input("A;<Esc>"); QTest::keyClick(&editor,Qt::Key_Return,Qt::ControlModifier);
     QTRY_COMPARE(executed,QString("one!?;"));
+}
+
+void TestNvimInputHandler::emptyEditor()
+{
+    QTemporaryDir config; QsciScintilla editor;
+    editor.setEolMode(QsciScintilla::EolUnix);
+    NvimInputHandler nvim(&editor);
+    QVERIFY(nvim.start(NvimInputHandler::executablePath(),config.path()));
+    QTRY_VERIFY(nvim.isReady());
+    nvim.input("iSELECT 1;<Esc>");
+    QTRY_COMPARE(editor.text(),QString("SELECT 1;"));
+    nvim.input("u"); QTRY_COMPARE(editor.text(),QString(""));
+    nvim.input("i中文<Esc>"); QTRY_COMPARE(editor.text(),QString::fromUtf8("中文"));
 }
 QTEST_MAIN(TestNvimInputHandler)
 #include "TestNvimInputHandler.moc"
