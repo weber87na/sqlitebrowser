@@ -1,31 +1,183 @@
-# Full Vim editing in DB Browser for SQLite
+# DB Browser for SQLite：Vim 中文操作說明
 
-The Windows x64 portable ZIP bundles Neovim 0.12.5 and its runtime under `nvim/`.
-Keep that directory beside DB Browser's executable. In Edit > Preferences > SQL,
-enable **Vim editing mode** and **Full Vim engine**. The editor status shows `NVIM`.
-Disable Full Vim engine to return to the basic built-in emulator.
+## 兩種 Vim 模式
 
-Native commands include J/gJ, . repeat, f/F/t/T, ;/comma, */#, >>/<<, =,
-X/S/R, Ctrl+V block selection, gv, visual o, gu/gU, Ctrl+D/U/F/B,
-zz/zt/zb, paragraph/sentence/screen motions, marks, jump history,
-macros, named registers, :s / :%s / :g, and Vim regex search.
-These use the Neovim engine, not reimplemented approximations.
+程式同時保留「內建基本模式」與「Neovim 模式」。**Vim 編輯功能可以直接實作在程式內，並非一定需要 Neovim。** 目前較完整的功能採用 Neovim 核心；內建模式的指令範圍較小。
 
-vim-surround is bundled: ysiw", yss), cs"', ds), and visual S.
-Opening bracket targets add padding; closing bracket targets do not.
-Your default leader is comma. The comma leader mappings and reverse-find comma
-share Neovim's normal mapping timeout rules (adjust `timeoutlen` if desired).
+| 模式 | 是否需要 Neovim | 目前用途 |
+| --- | --- | --- |
+| 內建基本模式 | 不需要 | 基本移動、編輯、文字物件與 surround |
+| Neovim 模式 | 需要；x64 免安裝 ZIP 已附帶 | 原生 Vim 指令、重複操作、巨集、暫存器、正規表示式與設定檔 |
 
-## Configuration
+Windows x64 ZIP 的 `nvim` 資料夾包含 Neovim 0.12.5 與執行環境。請保留它，與 DB Browser 主程式放在同一層。x86 ZIP 未附 Neovim，預設使用內建基本模式。
 
-Hover over the NVIM status label to see the exact configuration directory.
-It is Qt's application configuration location with `/nvim` appended.
-Create `init.lua` there, or `init.vim` if you prefer Vimscript. `init.lua` takes
-precedence. Reload by disabling/re-enabling Full Vim engine or restarting DB Browser.
-Your existing standalone Neovim config is not automatically executed.
+## 啟用與切換
 
-For a predictable custom location, set `DB4S_NVIM_CONFIG` to a directory before
-starting DB Browser. Example PowerShell:
+1. 解壓縮 Windows x64 ZIP，執行 DB Browser 主程式。
+2. 開啟「編輯 → 偏好設定 → SQL」（英文介面：Edit → Preferences → SQL）。
+3. 勾選 **Vim editing mode**，啟用 Vim 操作。
+4. 勾選 **Full Vim engine**，使用 Neovim；SQL 編輯區狀態列會顯示 `NVIM`。
+5. 若要使用不依賴 Neovim 的內建模式，取消勾選 **Full Vim engine**，保留 **Vim editing mode**。
+
+切換引擎或重新啟動程式會重建該分頁的 Neovim 狀態，原有巨集與復原歷史不會保留。建議先儲存 SQL。
+
+**以下完整指令表以 Neovim 模式為準，不表示內建模式已全部支援。**
+
+## 按鍵怎麼看
+
+- `J` 表示大寫 J，通常按 **Shift+J**。
+- `dw` 表示先按 `d`，再按 `w`，不需要同時按。
+- `Ctrl+V` 表示按住 Ctrl 再按 V。
+- `<Esc>` 表示 Esc 鍵；指令中的 `<CR>` 表示 Enter 鍵。
+- `<leader>` 預設為逗號 `,`，例如 `<leader>xs` 就是依序輸入 `,xs`。
+- 指令前可以加次數，例如 `3w`、`2dd`。不是每一個指令都接受相同的次數語意。
+
+## 模式切換
+
+| 按鍵 | 功能 |
+| --- | --- |
+| `Esc` 或 `,,` | 回到一般模式，或取消尚未完成的指令 |
+| `i`／`a` | 在游標前／後開始輸入 |
+| `I`／`A` | 在行首第一個非空白字元前／行尾開始輸入 |
+| `o`／`O` | 在下一行／上一行新增一行並輸入 |
+| `v` | 字元選取模式 |
+| `V` | 整行選取模式 |
+| `Ctrl+V` | 矩形區塊選取模式 |
+| `R` | 連續取代模式；按 Esc 結束 |
+
+在 Vim 一般模式按字母通常會執行指令。要輸入 SQL，請先按 `i` 等按鍵進入輸入模式。
+
+## 游標移動與捲動
+
+| 按鍵 | 功能 |
+| --- | --- |
+| `h`／`j`／`k`／`l` | 左／下／上／右 |
+| `w`／`b`／`e` | 下一個單字開頭／上一個單字開頭／單字結尾 |
+| `W`／`B`／`E` | 以空白分隔的大單字移動，將相連標點視為同一段 |
+| `0`／`^`／`$` | 行首／第一個非空白字元／行尾 |
+| `gg`／`G`／`10G` | 文件開頭／結尾／第 10 行 |
+| `f,`／`F,` | 向右／向左找到同一行的逗號 |
+| `t,`／`T,` | 向右／向左移動到逗號前一個位置 |
+| `;`／`,` | 重複上次字元查找／反向重複查找 |
+| `%` | 在配對括號之間跳轉 |
+| `{`／`}` | 上一段／下一段 |
+| `(`／`)` | 上一句／下一句 |
+| `H`／`M`／`L` | 畫面上方／中間／下方的行 |
+| `Ctrl+D`／`Ctrl+U` | 向下／向上捲動半頁 |
+| `Ctrl+F`／`Ctrl+B` | 向下／向上捲動一頁 |
+| `zz`／`zt`／`zb` | 將目前行放在畫面中間／上方／下方 |
+
+逗號同時是預設 leader，因此單獨按 `,` 反向查找可能需要等待映射逾時。可在設定檔調整 `timeoutlen`，或改用其他 leader。
+
+## 編輯、合併與復原
+
+| 按鍵 | 功能 |
+| --- | --- |
+| `x`／`X` | 刪除游標下／游標前的字元 |
+| `dw`／`dd`／`D` | 刪除到下一個單字／刪除整行／刪除到行尾 |
+| `cw`／`cc`／`C` | 修改單字剩餘部分／整行／到行尾，接著進入輸入模式 |
+| `s`／`S` | 刪除一個字元／修改整行，接著進入輸入模式 |
+| `r字元` | 用指定字元取代游標下的字元 |
+| `yy`／`p`／`P` | 複製整行／貼在後方／貼在前方 |
+| `J` | 合併下一行，依 Vim 規則處理縮排與空白 |
+| `gJ` | 合併下一行，不額外增刪兩行之間的空白 |
+| `3J` | 合併目前行起的三行 |
+| `.` | 重複上一次編輯操作 |
+| `u`／`Ctrl+R` | 復原／重做 |
+| `>>`／`<<` | 增加／減少縮排 |
+| `==` | 依目前縮排設定重新縮排目前行 |
+| `gg=G` | 重新縮排整份文件，結果取決於檔案類型與縮排設定 |
+| `~`／`gUiw`／`guiw` | 切換字元大小寫／將單字轉大寫／轉小寫 |
+
+例如把 `SELECT *` 與下一行的 `FROM test;` 合併：將游標放在第一行，一般模式按 `J`。
+
+## 文字物件
+
+`i` 表示內部，`a` 表示包含周圍界線或空白。前面可搭配 `d` 刪除、`c` 修改、`y` 複製、`v` 選取。
+
+| 範例 | 功能 |
+| --- | --- |
+| `ciw` | 修改游標所在的整個單字 |
+| `diw`／`daw` | 刪除單字／刪除單字及相鄰空白 |
+| `ciW` | 修改包含相連標點的大單字 |
+| `ci'`／`ci"` | 修改單引號／雙引號內的內容 |
+| `ci(`／`di(` | 修改／刪除括號內的內容 |
+| `da(` | 刪除內容及整組括號 |
+| `viw`／`va(` | 選取單字／整組括號 |
+
+## surround：新增、更換、移除包圍符號
+
+Neovim 模式附帶 vim-surround 與 vim-repeat，可搭配 `.` 重複操作。
+
+| 按鍵 | 範例或作用 |
+| --- | --- |
+| `ysiw"` | `name` → `"name"` |
+| `ysiw'` | `name` → `'name'` |
+| `ysiw)` | `name` → `(name)` |
+| `ysiw(` | `name` → `( name )`，包含內側空白 |
+| `yss]` | 用中括號包住目前行的文字 |
+| `cs"'` | `"name"` → `'name'` |
+| `cs)]` | `(name)` → `[name]` |
+| `ds"`／`ds)` | 移除外側雙引號／括號，保留內文 |
+| 選取後按 `S"` | 用雙引號包住選取內容 |
+
+新增括號時，開括號 `(`、`[`、`{` 會加入內側空白；閉括號 `)`、`]`、`}` 不加空白。
+
+## 搜尋與批次取代
+
+| 指令 | 功能 |
+| --- | --- |
+| `/文字` 再按 Enter | 向下搜尋 |
+| `?文字` 再按 Enter | 向上搜尋 |
+| `n`／`N` | 下一個結果／反方向結果 |
+| `*`／`#` | 向下／向上搜尋游標所在的單字 |
+| `:s/foo/bar/g` 再按 Enter | 將目前行全部 `foo` 改為 `bar` |
+| `:%s/foo/bar/g` 再按 Enter | 將整份文件全部 `foo` 改為 `bar` |
+| `:g/DELETE/d` 再按 Enter | 刪除所有符合 `DELETE` 的文字行 |
+
+搜尋與取代使用 Vim 的正規表示式語法。例如 `:%s/\d\+/X/g` 可把連續數字改為 `X`。這些操作修改的是 SQL 文字，並不會因此執行資料庫 SQL。
+
+## 選取、標記、暫存器與巨集
+
+- **矩形選取：**按 `Ctrl+V`，用方向指令擴大範圍，再按 `d`、`c` 等進行編輯。
+- **恢復選取：**`gv` 恢復上一次的選取；在選取模式按 `o` 可交換操作端點。
+- **標記：**`ma` 設定標記 a；`'a` 回到標記所在行，反引號加 `a` 回到精確位置。
+- **跳轉歷史：**`Ctrl+O` 返回較早的位置；`Ctrl+I` 前往較後的位置。
+- **具名暫存器：**`"ayiw` 將單字複製到暫存器 a；`"ap` 貼上暫存器 a。
+- **不覆蓋剪貼簿的刪除：**`"_dw` 使用黑洞暫存器刪除文字。
+- **錄製巨集：**按 `qa` 開始錄到 a，執行操作，再按 `q` 結束；`@a` 執行，`3@a` 執行三次。
+
+每個 SQL 分頁使用獨立 Neovim 程序，因此具名暫存器、巨集、標記及復原歷史不會跨分頁共用。系統剪貼簿可以跨分頁共用。
+
+## 已內建的個人快捷鍵
+
+| 模式 | 按鍵 | 功能 |
+| --- | --- | --- |
+| 輸入／一般／選取 | `,,` | Esc |
+| 輸入 | `zh`／`zl` | 到行首第一個非空白字元前／行尾繼續輸入 |
+| 輸入 | `z;`／`z,` | 到行尾加入分號／逗號並繼續輸入 |
+| 一般 | `zh`／`zl` | 到第一個非空白字元／行尾 |
+| 一般 | `z;`／`z,` | 在行尾加入分號／逗號並回到一般模式 |
+| 一般 | `,xs` | 儲存 SQL |
+| 一般 | `,xm` | 開啟 `:` 命令列 |
+| 一般／選取 | `,ss` | 搜尋 |
+| 一般／選取 | `,ci` | 切換註解 |
+| 選取 | `,aa` | 複製到系統剪貼簿 |
+
+## 自訂 init.lua／init.vim
+
+將滑鼠停在 `NVIM` 狀態列上，可看到實際設定目錄。在該目錄建立：
+
+- `init.lua`：使用 Lua 設定。
+- `init.vim`：使用 Vimscript 設定。若兩者同時存在，優先載入 `init.lua`。
+
+載入順序為程式預設快捷鍵在前、自訂設定在後。修改後，關閉再啟用 Full Vim engine，或重新啟動程式。
+
+程式不會自動載入你原本獨立使用的 Neovim 設定。若複製完整設定檔，也要提供它依賴的 Lua 模組與外掛；程式不會自動安裝外掛。
+
+### 指定容易找到的設定目錄
+
+在解壓縮後的程式目錄開啟 PowerShell，執行：
 
 ```powershell
 $env:DB4S_NVIM_CONFIG = "$env:USERPROFILE\db4s-nvim"
@@ -34,52 +186,33 @@ notepad "$env:DB4S_NVIM_CONFIG\init.lua"
 & '.\DB Browser for SQLite.exe'
 ```
 
-Example init.lua:
+這個環境變數只作用於目前 PowerShell 及由它啟動的程式；日後若要使用同一目錄，請以相同方式啟動或自行設定持續有效的環境變數。
+
+### init.lua 範例
 
 ```lua
-vim.opt.shiftwidth = 2
-vim.opt.expandtab = true
-vim.opt.ignorecase = true
-vim.opt.smartcase = true
-vim.opt.timeoutlen = 400
+vim.g.mapleader = ','
+vim.opt.shiftwidth = 2       -- 每層縮排兩格
+vim.opt.expandtab = true    -- 用空白取代 Tab
+vim.opt.ignorecase = true   -- 搜尋預設忽略大小寫
+vim.opt.smartcase = true    -- 搜尋字串含大寫時區分大小寫
+vim.opt.timeoutlen = 400    -- 快捷鍵等待時間，單位毫秒
 vim.keymap.set('n', '<leader>xs', '<Cmd>write<CR>')
 ```
 
-The defaults include `,,`, zh/zl/z;/z,, leader ss/xs/ci, and visual leader aa.
-User settings load after defaults. If copying an existing init.lua, also provide
-any Lua modules or plugins it requires. Plugin installation is not automatic.
-To use another Neovim executable, set `DB4S_NVIM` to its full path.
+若要指定其他 Neovim 執行檔，可將 `DB4S_NVIM` 設為該執行檔的完整路徑。
 
-## Integration boundaries
+## 與 DB Browser 的整合範圍
 
-- Each SQL editor has a separate Neovim process and buffer. Registers, macros,
-  marks and undo history are local to that editor; the system clipboard is shared.
-- The SQL widget displays the current Neovim buffer, selection and command line.
-  It is not a full terminal renderer: split layouts, terminal applications,
-  floating plugin windows and completion popups are not rendered as Neovim UIs.
-- Ctrl+Enter keeps executing SQL; Ctrl+S keeps the application's Save action.
-  Other Ctrl commands go to Neovim while its editor has focus.
-- `:write` in the original SQL buffer invokes the application's Save SQL action.
-  File management through :edit/buffer switching is not integrated with DB Browser
-  tab names. Use DB Browser tabs and Open SQL for file management.
-- Buffer text, cursor, visual selection, and viewport are synchronized. Syntax
-  colors and fonts still come from DB Browser. Neovim highlight/search decorations
-  are not painted by the SQL widget.
-- If Neovim exits, the last synchronized SQL text remains and the basic emulator
-  becomes available. A restart resets that editor's Neovim undo/macro history.
-- The x86 ZIP does not bundle Neovim (upstream supplies x64/ARM64 Windows builds).
-  Its default fallback is the basic emulator, with the smaller supported command set.
+- `Ctrl+Enter` 執行 SQL；`Ctrl+S` 儲存 SQL。執行前會先同步待處理的 Neovim 文字。
+- 在原始 SQL 緩衝區輸入 `:write`，會呼叫程式的 SQL 儲存功能。
+- 檔案管理請使用 DB Browser 的開啟 SQL 與分頁功能；`:edit`、Neovim 緩衝區切換尚未與分頁名稱整合。
+- 字體與語法配色仍由 DB Browser 設定。Neovim 的搜尋高亮等裝飾不會直接繪製在 SQL 編輯區。
+- 分割視窗、終端應用、浮動外掛視窗與 Neovim 補全選單尚未呈現為完整的 Neovim 圖形介面。
+- 若 Neovim 結束，已同步的 SQL 文字仍保留在編輯區，可回到內建基本模式。
 
-## Third-party components
+## 第三方元件
 
-Neovim: https://github.com/neovim/neovim/releases/tag/v0.12.5
-(Neovim Apache-2.0 and inherited Vim license files are retained in its distribution.)
-
-vim-surround: Tim Pope, https://github.com/tpope/vim-surround
-Vendored plugin blob: 8a4016e9101001fa37ae5e511fb45466b9d016f7.
-Its header and license notices are retained in src/vim/surround.vim;
-vim-surround is distributed under the same terms as Vim.
-
-vim-repeat: Tim Pope, https://github.com/tpope/vim-repeat
-Vendored autoload blob: 364d311cd3a12f4111264e852377a96b86a8d641.
-It provides dot-repeat integration for vim-surround; distributed under Vim's terms.
+- [Neovim 0.12.5](https://github.com/neovim/neovim/releases/tag/v0.12.5)：發行套件保留其 Apache-2.0 與繼承自 Vim 的授權文件。
+- [vim-surround](https://github.com/tpope/vim-surround)：作者 Tim Pope，採 Vim 相同授權條款。所用檔案版本為 `8a4016e9101001fa37ae5e511fb45466b9d016f7`，原始檔保留標頭與授權聲明。
+- [vim-repeat](https://github.com/tpope/vim-repeat)：作者 Tim Pope，採 Vim 相同授權條款。所用檔案版本為 `364d311cd3a12f4111264e852377a96b86a8d641`，用於 surround 的 `.` 重複操作。

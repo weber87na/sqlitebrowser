@@ -74,52 +74,18 @@ Controls and wizards are available for users to:
 
 ## Vim editing mode
 
-Vim-style modal editing can be enabled in **Edit > Preferences > SQL > Vim
-editing mode**. It works in SQL editors on every supported platform, including
-Windows, and is disabled by default.
+### Vim 中文操作說明
 
-The editor shows the active mode in its lower-right corner. Supported commands
-include:
+請參閱 [完整中文操作說明](doc/vim-native.md)，內容包含啟用方式、常用指令、surround、巨集、暫存器、搜尋與取代，以及 `init.lua`／`init.vim` 設定。
 
-* Modes: `i`, `I`, `a`, `A`, `o`, `O`, `Esc`, `v`, and `V`
-* Motions: `h`, `j`, `k`, `l`, `w`, `b`, `e`, `W`, `B`, `E`, `0`, `^`, `$`, `gg`, `G`, and `%`
-* Editing: `x`, `s`, `d`, `c`, `y`, `r`, `p`, `P`, `J`, `~`, `u`, and `Ctrl+R`
-* Searching: `/`, `?`, `n`, and `N`
-* Counts and common combinations such as `3w`, `2dd`, `dw`, `d$`, `yy`, and
-  visual-mode `d`, `c`, or `y`
+程式保留兩種模式：
 
-Text objects work with `d`, `c`, `y`, and Visual mode:
+- **內建基本模式**：不需要 Neovim，支援基本移動、編輯、文字物件與 surround。
+- **Neovim 模式**：使用真正的 Neovim 核心，提供較完整的 Vim 指令與設定檔支援。Windows x64 免安裝 ZIP 已附執行環境。
 
-| Keys | Operation |
-| --- | --- |
-| `ciw`, `diw`, `yiw`, `viw` | Change, delete, yank, or select the word under the cursor |
-| `daw` | Delete a word and adjacent whitespace |
-| `ciW` | Change a whitespace-delimited WORD, including punctuation |
-| `ci'`, `ci"`, "ci`" | Change the contents of a quoted string on the current line |
-| `di(`, `di[`, `di{`, `di<` | Delete the contents of an enclosing delimiter pair |
-| `da(`, `va(` | Delete or select a pair including its delimiters |
-| `d2i(` | Delete the contents of the next enclosing parenthesis pair |
+在「編輯 → 偏好設定 → SQL」勾選 **Vim editing mode**；再勾選 **Full Vim engine** 即使用 Neovim，狀態列會顯示 `NVIM`。取消 Full Vim engine 可回到內建模式。
 
-Opening and closing bracket names are interchangeable; `b` means parentheses
-and `B` means braces. Word counts such as `d2iw` are supported. `cw` and `cW`
-on non-whitespace preserve the separator after the changed word. Escape cancels
-an incomplete command. Missing enclosing pairs leave the document unchanged.
-Bracket objects use balanced delimiters, not a SQL parser; quotes and comments
-inside a block are not parsed specially. This is a Vim emulation subset, not a
-Neovim runtime or a general-purpose `init.lua` interpreter.
-
-Surround editing supports `ys{motion}{delimiter}`, `ysiw"`, `yss)`,
-`cs"'`, `ds"`, and Visual-mode `S{delimiter}`. Supported delimiters are
-parentheses, square/curly/angle brackets, single/double quotes, and backticks.
-Opening `(`, `[`, `{` add padding; closing `)`, `]`, `}` do not.
-`b` and `B` are aliases for tight parentheses and braces. Counts select words
-or enclosing bracket levels (for example `ys2iw"`, `2ds)`). Each completed
-surround edit is one undo action and leaves the clipboard unchanged. Escape
-cancels an unfinished command. HTML tags, custom surround definitions, insert
-mode surround, and dot-repeat are not implemented.
-
-Yanks and deletes use the system clipboard, so text can be copied to and from
-other Windows applications.
+Vim 功能本身可以直接實作在程式內；Neovim 是目前用來提供較完整相容性的架構選項，並非唯一實作方式。x86 ZIP 未附 Neovim，預設使用內建基本模式。
 
 ## What it is not
 

@@ -1,0 +1,39 @@
+name: 更新 Vim 中文操作說明
+on:
+  workflow_dispatch:
+  push:
+    branches: [vim-mode-windows]
+    paths:
+      - doc/vim-native.md
+      - .github/workflows/publish-vim-guide.yml
+permissions:
+  contents: write
+jobs:
+  guide:
+    if: github.repository == 'weber87na/sqlitebrowser'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: 更新既有預發布的中文說明
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cp doc/vim-native.md VIM-GUIDE-zh-TW.md
+          gh release upload vim-neovim-18 VIM-GUIDE-zh-TW.md --clobber
+          cat > notes.md <<'NOTES'
+          ## Vim 中文操作說明
+
+          請下載附件 **VIM-GUIDE-zh-TW.md** 閱讀中文操作說明，包含啟用方式、指令表、surround、巨集、暫存器及設定檔範例。
+
+          Windows x64 免安裝 ZIP 已附 Neovim 0.12.5，啟用「Vim editing mode」與「Full Vim engine」後，狀態列會顯示 NVIM。
+
+          支援 J/gJ、`.` 重複編輯、字元跳轉、縮排、矩形選取、標記、巨集、暫存器、Vim 正規表示式、:s／:g、init.lua／init.vim，以及 surround。
+
+          不使用 Neovim 時，可取消 Full Vim engine，回到指令較少的內建基本模式。x86 ZIP 未附 Neovim，預設使用內建模式。
+
+          兩套回歸測試與 Windows 編譯均通過。附件 SHA256SUMS.txt 提供 ZIP 校驗值。
+
+          此次僅更新說明：既有 ZIP 與校驗值保持原樣，ZIP 內原先的英文 VIM-README.md 請以附件中文說明為準。分割視窗、終端及浮動外掛介面尚未整合。
+          NOTES
+          gh release edit vim-neovim-18 --notes-file notes.md

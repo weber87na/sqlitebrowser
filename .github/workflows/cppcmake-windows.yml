@@ -327,14 +327,15 @@ jobs:
           for archive in dist/*.zip; do unzip -tq "$archive"; done
           (cd dist && sha256sum *.zip > SHA256SUMS.txt)
           cat > notes.md <<'NOTES'
-          Full Vim editing through bundled Neovim 0.12.5 (Windows x64 portable ZIP).
+          Windows x64 免安裝 ZIP 已附 Neovim 0.12.5，提供較完整的 Vim 編輯功能。
 
-          Native J/gJ, dot repeat, character motions, indentation, visual block, marks,
-          macros, registers, Ex substitutions/global commands, init.lua/init.vim,
-          and vim-surround. Default Dracula theme and existing font settings remain.
+          支援 J/gJ、`.` 重複操作、字元跳轉、縮排、矩形選取、標記、巨集、
+          暫存器、搜尋與批次取代、init.lua／init.vim，以及 surround。
+          保留 Dracula 預設佈景與現有字體設定。
 
-          The x86 ZIP uses the basic built-in emulator; it does not bundle Neovim.
-          See VIM-README.md inside the ZIP for configuration and integration limits.
-          Built only after the legacy and native Qt integration tests pass.
+          啟用方式：偏好設定 → SQL，勾選 Vim editing mode 與 Full Vim engine。
+          x86 ZIP 未附 Neovim，使用指令較少的內建基本模式。
+          請閱讀 ZIP 內的 VIM-README.md 中文操作說明與整合限制。
+          此版本在內建 Vim 與 Neovim 整合測試通過後才進行 Windows 編譯。
           NOTES
           gh release create "$RELEASE_TAG" --target vim-mode-windows --title "Vim + Neovim portable ($RELEASE_TAG)" --prerelease --notes-file notes.md dist/*.zip dist/SHA256SUMS.txt
