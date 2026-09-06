@@ -1,4 +1,5 @@
 <RCC><qresource prefix="/vim">
 <file>bridge.lua</file>
 <file>surround.vim</file>
+<file>repeat.vim</file>
 </qresource></RCC>

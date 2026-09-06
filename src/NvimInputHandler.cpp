@@ -28,6 +28,9 @@ NvimInputHandler::NvimInputHandler(QsciScintilla* editor, QObject* parent) : QOb
     });
     m_poll.setInterval(40);
     connect(&m_poll, &QTimer::timeout, this, &NvimInputHandler::snapshot);
+    connect(m_editor, &QsciScintilla::textChanged, this, [this]() {
+        if(m_ready && !m_applying) synchronize();
+    });
     // Installed after the legacy handler, so native input takes precedence.
     m_editor->installEventFilter(this);
 }
@@ -50,7 +53,7 @@ bool NvimInputHandler::start(const QString& executable, const QString& config)
     const QString path = executable.isEmpty() ? executablePath() : executable;
     if(path.isEmpty()) return false;
     m_stopping = false; m_ready = false; m_received.clear(); m_replies.clear();
-    m_pendingKeys.clear(); m_text.clear(); m_snapshotPending = false;
+    m_pendingKeys.clear(); m_text.clear(); m_tick=-1; m_buffer=-1; m_snapshotPending = false;
     m_config = config.isEmpty() ? configDirectory() : config;
     QDir().mkpath(m_config);
     m_status = tr("Starting Neovim…"); emit statusChanged();
@@ -62,6 +65,9 @@ bool NvimInputHandler::start(const QString& executable, const QString& config)
         const int channel = api.value(0).toInt();
         request("nvim_ui_attach", {80, 24, QVariantMap{{"rgb",true},{"ext_linegrid",true},
             {"ext_cmdline",true},{"ext_messages",true}}});
+        QDir().mkpath(m_runtime.path()+"/autoload");
+        QFile::copy(":/vim/repeat.vim",m_runtime.path()+"/autoload/repeat.vim");
+        lua("vim.opt.runtimepath:prepend(...)", {m_runtime.path()});
         QFile plugin(":/vim/surround.vim"); plugin.open(QIODevice::ReadOnly);
         request("nvim_exec2", {QString::fromUtf8(plugin.readAll()), QVariantMap{}});
         QFile script(":/vim/bridge.lua"); script.open(QIODevice::ReadOnly);
@@ -118,8 +124,14 @@ void NvimInputHandler::notification(const QString& method, const QVariantList& a
         if(args.value(1).toString() == "V") value += '\n';
         m_clipboard = value; m_clipboardKind = args.value(1).toString();
         QApplication::clipboard()->setText(value);
-    } else if(method == "db4s_save") emit saveRequested();
-    else if(method == "db4s_error") { m_status = args.value(0).toString(); emit statusChanged(); }
+    } else if(method == "db4s_save") {
+        // Flush native edits before Save reads the SQL widget, even when :w is
+        // part of the same input burst as the change.
+        lua("return _G.db4s_snapshot(-1,-1)", {}, [this](const QVariant& value, const QVariant& error) {
+            if(!error.isValid()) { applySnapshot(value.toMap()); emit saveRequested(); }
+        });
+    }
+    else if(method == "db4s_error") { m_message = args.value(0).toString(); m_status = m_message; emit statusChanged(); }
     else if(method == "redraw") {
         for(const auto& item : args) {
             const auto event = item.toList(); const QString name = event.value(0).toString();
@@ -132,7 +144,7 @@ void NvimInputHandler::notification(const QString& method, const QVariantList& a
                 else if(name == "msg_show") {
                     QString message;
                     for(const auto& chunk : values.value(1).toList()) message += chunk.toList().value(1).toString();
-                    if(!message.isEmpty()) { m_status = message; emit statusChanged(); }
+                    if(!message.isEmpty()) { m_message = message; m_status = message; emit statusChanged(); }
                 }
             }
         }
@@ -153,11 +165,18 @@ void NvimInputHandler::synchronize()
         QVariantList lines; for(const auto& line : normalized.split('\n')) lines << line;
         const int pos = int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS));
         const int row = int(m_editor->SendScintilla(QsciScintillaBase::SCI_LINEFROMPOSITION,pos));
+        m_lastCaret = pos;
         const int col = pos - int(m_editor->SendScintilla(QsciScintillaBase::SCI_POSITIONFROMLINE,row));
         lua("local lines,eol,row,col,ro=...; vim.bo.modifiable=true; "
             "vim.api.nvim_buf_set_lines(0,0,-1,true,lines); vim.bo.endofline=eol; "
             "vim.bo.fixendofline=false; pcall(vim.api.nvim_win_set_cursor,0,{math.min(row+1,#lines),col}); "
             "vim.bo.readonly=ro; vim.bo.modifiable=not ro", {lines,eol,row,col,m_editor->isReadOnly()});
+    }
+    const int caret = int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS));
+    if(caret != m_lastCaret) {
+        m_lastCaret = caret;
+        const int row = int(m_editor->SendScintilla(QsciScintillaBase::SCI_LINEFROMPOSITION,caret));
+        lua("pcall(vim.api.nvim_win_set_cursor,0,{...})", {row+1,caret-position(row,0)});
     }
 }
 void NvimInputHandler::input(const QString& keys)
@@ -165,6 +184,7 @@ void NvimInputHandler::input(const QString& keys)
     if(!isActive()) return;
     if(!m_ready) { m_pendingKeys += keys; return; }
     synchronize();
+    m_message.clear();
     QString clipboard = QApplication::clipboard()->text();
     const QString kind = clipboard == m_clipboard ? m_clipboardKind : "v";
     if(kind == "V" && clipboard.endsWith('\n')) clipboard.chop(1);
@@ -178,7 +198,7 @@ void NvimInputHandler::snapshot()
     synchronize();
     const int epoch = m_epoch;
     m_snapshotPending = true;
-    lua("return _G.db4s_snapshot()", {}, [this,epoch](const QVariant& value, const QVariant& error) {
+    lua("return _G.db4s_snapshot(...)", {m_tick,m_buffer}, [this,epoch](const QVariant& value, const QVariant& error) {
         m_snapshotPending = false;
         if(!error.isValid() && epoch == m_epoch) applySnapshot(value.toMap());
     });
@@ -194,6 +214,7 @@ void NvimInputHandler::applySnapshot(const QVariantMap& data)
 {
     if(data.isEmpty()) return;
     m_applying = true;
+    m_tick = data.value("tick").toLongLong(); m_buffer = data.value("buffer").toInt();
     if(data.value("lines").type() == QVariant::List) {
         QStringList lines; for(const auto& line : data.value("lines").toList()) lines << line.toString();
         QString text = lines.join(m_eol);
@@ -232,8 +253,11 @@ void NvimInputHandler::applySnapshot(const QVariantMap& data)
             last = hi + 1 < m_editor->lines() ? position(hi+1,0) : position(hi,2147483647);
         } else last = int(m_editor->SendScintilla(QsciScintillaBase::SCI_POSITIONAFTER,last));
         if(m_mode.startsWith(QChar(22))) {
-            m_editor->SendScintilla(QsciScintillaBase::SCI_SETRECTANGULARSELECTIONANCHOR,start);
-            m_editor->SendScintilla(QsciScintillaBase::SCI_SETRECTANGULARSELECTIONCARET,caret);
+            const bool right = cursor.value(1).toInt() >= anchor.value(1).toInt();
+            const int a = right ? start : int(m_editor->SendScintilla(QsciScintillaBase::SCI_POSITIONAFTER,start));
+            const int c = right ? int(m_editor->SendScintilla(QsciScintillaBase::SCI_POSITIONAFTER,caret)) : caret;
+            m_editor->SendScintilla(QsciScintillaBase::SCI_SETRECTANGULARSELECTIONANCHOR,a);
+            m_editor->SendScintilla(QsciScintillaBase::SCI_SETRECTANGULARSELECTIONCARET,c);
         } else m_editor->SendScintilla(QsciScintillaBase::SCI_SETSEL,caret>=start ? first:last,caret>=start ? last:first);
     } else m_editor->SendScintilla(QsciScintillaBase::SCI_SETEMPTYSELECTION,caret);
     m_editor->SendScintilla(QsciScintillaBase::SCI_SETCARETSTYLE,
@@ -244,7 +268,8 @@ void NvimInputHandler::applySnapshot(const QVariantMap& data)
         m_mode.startsWith('v') ? "VISUAL" : m_mode.startsWith('c') ? "COMMAND" : "NORMAL";
     const QString recording = data.value("recording").toString();
     if(!recording.isEmpty()) label += " | recording @" + recording;
-    m_status = m_commandLine.isEmpty() ? "NVIM — " + label : m_commandLine;
+    m_status = m_commandLine.isEmpty() ? "NVIM — " + label + (m_message.isEmpty() ? "" : " | " + m_message) : m_commandLine;
+    m_lastCaret = int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS));
     m_applying = false; emit statusChanged();
 }
 void NvimInputHandler::resize()

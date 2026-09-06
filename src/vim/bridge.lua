@@ -52,6 +52,7 @@ vim.api.nvim_create_autocmd('BufWriteCmd', {
 })
 -- Config is specific to DB Browser. It is never silently copied from the
 -- user's main Neovim configuration (which may depend on a terminal GUI).
+vim.opt.runtimepath:prepend(config)
 local init = config .. '/init.lua'
 local vimrc = config .. '/init.vim'
 if vim.fn.filereadable(init) == 1 then
@@ -61,18 +62,16 @@ elseif vim.fn.filereadable(vimrc) == 1 then
   local ok, err = pcall(vim.cmd.source, vimrc)
   if not ok then vim.rpcnotify(channel, 'db4s_error', tostring(err)) end
 end
-local last_tick, last_buf = -1, -1
-_G.db4s_snapshot = function()
+_G.db4s_snapshot = function(last_tick, last_buf)
   local buf = vim.api.nvim_get_current_buf()
   local tick = vim.api.nvim_buf_get_changedtick(buf)
   local lines = false
   if tick ~= last_tick or buf ~= last_buf then
     lines = vim.api.nvim_buf_get_lines(buf, 0, -1, true)
-    last_tick, last_buf = tick, buf
   end
   local cursor = vim.api.nvim_win_get_cursor(0)
   local anchor = vim.fn.getpos('v')
-  return {lines=lines, eol=vim.bo.endofline, mode=vim.fn.mode(1),
+  return {lines=lines, tick=tick, buffer=buf, eol=vim.bo.endofline, mode=vim.fn.mode(1),
     cursor=cursor, anchor={anchor[2], math.max(0, anchor[3]-1)},
     top=vim.fn.line('w0'), recording=vim.fn.reg_recording(),
     modified=vim.bo.modified}

@@ -79,3 +79,7 @@ vim-surround: Tim Pope, https://github.com/tpope/vim-surround
 Vendored plugin blob: 8a4016e9101001fa37ae5e511fb45466b9d016f7.
 Its header and license notices are retained in src/vim/surround.vim;
 vim-surround is distributed under the same terms as Vim.
+
+vim-repeat: Tim Pope, https://github.com/tpope/vim-repeat
+Vendored autoload blob: 364d311cd3a12f4111264e852377a96b86a8d641.
+It provides dot-repeat integration for vim-surround; distributed under Vim's terms.

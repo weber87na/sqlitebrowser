@@ -19,6 +19,8 @@ private slots:
     void vimrc();
     void externalEdits();
     void readonly();
+    void scrolling();
+    void saveBurst();
 };
 void TestNvimInputHandler::codec()
 {
@@ -43,7 +45,7 @@ void TestNvimInputHandler::commands_data()
     ROW("dot", "one two three", "dw.", "three");
     ROW("dot-insert", "one\ntwo", "A!<Esc>j.", "one!\ntwo!");
     ROW("find-delete", "abc,def;ghi", "dt;", ";ghi");
-    ROW("find-back", "abc,def", "$dF,", "abc");
+    ROW("find-back", "abc,def", "$dF,", "abcf");
     ROW("repeat-find", "a,b,c,d", "f,;x", "a,bc,d");
     ROW("X", "abc", "lX", "bc");
     ROW("S", "one\ntwo", "Snew<Esc>", "new\ntwo");
@@ -139,6 +141,37 @@ void TestNvimInputHandler::readonly()
     QTemporaryDir config; QsciScintilla editor; editor.setText("keep"); editor.setReadOnly(true);
     NvimInputHandler nvim(&editor); QVERIFY(nvim.start(NvimInputHandler::executablePath(),config.path()));
     QTRY_VERIFY(nvim.isReady()); nvim.input("dd"); QTest::qWait(250); QCOMPARE(editor.text(),QString("keep"));
+}
+
+void TestNvimInputHandler::scrolling()
+{
+    QTemporaryDir config; QsciScintilla editor; editor.resize(800,400); editor.show();
+    QStringList lines; for(int i=0;i<200;++i) lines << QString("line %1").arg(i);
+    editor.setText(lines.join('\n')); editor.setCursorPosition(0,0);
+    NvimInputHandler nvim(&editor); QVERIFY(nvim.start(NvimInputHandler::executablePath(),config.path()));
+    QTRY_VERIFY(nvim.isReady());
+    auto line=[&editor]() { return editor.SendScintilla(QsciScintillaBase::SCI_LINEFROMPOSITION,
+        editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS)); };
+    QTest::keyClick(&editor,Qt::Key_D,Qt::ControlModifier);
+    QTRY_VERIFY(line()>0); const auto half=line();
+    const auto page=editor.SendScintilla(QsciScintillaBase::SCI_LINESONSCREEN);
+    QVERIFY(half<page);
+    QTest::keyClick(&editor,Qt::Key_U,Qt::ControlModifier); QTRY_COMPARE(line(),0L);
+    QTest::keyClick(&editor,Qt::Key_F,Qt::ControlModifier); QTRY_VERIFY(line()>half);
+    QTest::keyClick(&editor,Qt::Key_B,Qt::ControlModifier); QTRY_VERIFY(line()<half);
+    nvim.input("100Gzt"); QTRY_COMPARE(line(),99L);
+    QTRY_COMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETFIRSTVISIBLELINE),99L);
+    nvim.input("L"); QTRY_VERIFY(line()>99L);
+    nvim.input("H"); QTRY_COMPARE(line(),99L);
+    nvim.input("M"); QTRY_VERIFY(line()>99L && line()<99+page);
+}
+void TestNvimInputHandler::saveBurst()
+{
+    QTemporaryDir config; QsciScintilla editor; editor.setEolMode(QsciScintilla::EolUnix); editor.setText("one");
+    NvimInputHandler nvim(&editor); QVERIFY(nvim.start(NvimInputHandler::executablePath(),config.path()));
+    QTRY_VERIFY(nvim.isReady()); QString saved;
+    connect(&nvim,&NvimInputHandler::saveRequested,&editor,[&]() { saved=editor.text(); });
+    nvim.input("A!<Esc>:w<CR>"); QTRY_COMPARE(saved,QString("one!"));
 }
 QTEST_MAIN(TestNvimInputHandler)
 #include "TestNvimInputHandler.moc"

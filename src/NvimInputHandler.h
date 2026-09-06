@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QProcess>
 #include <QTimer>
+#include <QTemporaryDir>
 #include <QHash>
 #include <QVariant>
 #include <functional>
@@ -44,6 +45,7 @@ private:
     int position(int line, int byteColumn) const;
     QsciScintilla* m_editor;
     QProcess m_process;
+    QTemporaryDir m_runtime;
     QTimer m_poll;
     QByteArray m_received;
     QHash<qlonglong, Reply> m_replies;
@@ -53,11 +55,15 @@ private:
     bool m_applying = false;
     bool m_stopping = false;
     int m_epoch = 0;
+    int m_lastCaret = -1;
+    qlonglong m_tick = -1;
+    int m_buffer = -1;
     QString m_text;
     QString m_eol = "\n";
     QString m_mode = "n";
     QString m_status;
     QString m_commandLine;
+    QString m_message;
     QString m_pendingKeys;
     QString m_config;
     QString m_clipboard;
