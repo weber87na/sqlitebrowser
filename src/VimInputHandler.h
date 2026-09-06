@@ -3,11 +3,14 @@
 
 #include <QObject>
 #include <QString>
+#include <QMap>
+#include <QVector>
 
 class QEvent;
 class QKeyEvent;
 class QsciScintilla;
 class QTimer;
+class QLineEdit;
 
 /**
  * @brief Adds a small, self-contained Vim emulation layer to QScintilla.
@@ -37,6 +40,8 @@ public:
     void setEnabled(bool enabled);
     bool isEnabled() const;
     Mode mode() const;
+    bool executeCommand(const QString& command);
+    bool loadConfig(const QString& path);
 
 signals:
     void modeChanged();
@@ -83,7 +88,7 @@ private:
     void applyLineOperator(int firstLine, int lastLine);
     void deleteCharacter(int count, bool enterInsertMode = false);
     void replaceCharacter(const QString& replacement, int count);
-    void joinLines(int count);
+    void joinLines(int count, bool raw = false);
     void toggleCase(int count);
 
     QString linesText(int firstLine, int lastLine) const;
@@ -97,6 +102,35 @@ private:
 
     void promptSearch(bool forward);
     void repeatSearch(bool reverse);
+
+    struct Stroke { int key; Qt::KeyboardModifiers modifiers; QString text; };
+    using Strokes = QVector<Stroke>;
+    bool processStroke(QKeyEvent* event);
+    void promptCommand();
+    void playMapping(const QString& mapping);
+    QMap<QString, QString> m_userMappings;
+    QString m_leader = ",";
+    QLineEdit* m_commandLine = nullptr;
+    void replay(const Strokes& keys, int count);
+    bool extendedNormal(const QString& key);
+    bool extendedPending(const QString& key);
+    bool findCharacter(const QString& command, const QString& target, int count);
+    void transformRange(int first, int last, const QString& operation);
+    void indentLines(int first, int last, const QString& operation);
+    bool m_forwarding = false;
+    int m_replayDepth = 0;
+    bool m_groupOpen = false;
+    QString m_changeBefore;
+    Strokes m_sequence, m_lastChange;
+    QMap<QString, Strokes> m_macros;
+    QString m_recording, m_lastMacro;
+    QMap<QString, QPair<QString, bool>> m_registers;
+    QString m_selectedRegister;
+    QMap<QString, int> m_marks;
+    QString m_findCommand, m_findTarget;
+    int m_savedAnchor = 0, m_savedCaret = 0;
+    Mode m_savedVisualMode = Mode::Visual;
+    bool m_replace = false;
 
     QsciScintilla* m_editor;
     bool m_enabled;

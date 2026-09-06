@@ -8,6 +8,10 @@ class TestVimInputHandler : public QObject
     Q_OBJECT
 
 private slots:
+    void builtinCommands_data();
+    void builtinCommands();
+    void repeatAndMacro();
+    void substitution();
     void surround_data();
     void surround();
     void textObjects_data();

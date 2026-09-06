@@ -452,3 +452,55 @@ void TestVimInputHandler::surround()
         QCOMPARE(editor.text(), expected);
     }
 }
+
+
+void TestVimInputHandler::builtinCommands_data()
+{
+    QTest::addColumn<QString>("input"); QTest::addColumn<QString>("keys"); QTest::addColumn<QString>("expected");
+    QTest::newRow("join") << "SELECT *\n  FROM test;" << "J" << "SELECT * FROM test;";
+    QTest::newRow("raw join") << "a\n  b" << "gJ" << "a  b";
+    QTest::newRow("count join") << "a\nb\nc\nd" << "3J" << "a b c\nd";
+    QTest::newRow("visual join") << "a\nb\nc\nd" << "VjjJ" << "a b c\nd";
+    QTest::newRow("forward find delete") << "abc,def,ghi" << "df," << "def,ghi";
+    QTest::newRow("forward till delete") << "abc,def" << "dt," << ",def";
+    QTest::newRow("backward find delete") << "abc,def" << "$dF," << "abcf";
+    QTest::newRow("counted find") << "abc,def,ghi" << "d2f," << "ghi";
+    QTest::newRow("digit target") << "abc2def" << "df2" << "def";
+    QTest::newRow("uppercase word") << "select from" << "gUw" << "SELECT from";
+    QTest::newRow("lowercase line") << "SELECT FROM" << "guu" << "select from";
+    QTest::newRow("visual uppercase") << "abc def" << "viwU" << "ABC def";
+    QTest::newRow("delete before") << "abc" << "$X" << "ac";
+    QTest::newRow("named register") << "abc def" << "\"ayiw$\"ap" << "abc defabc";
+    QTest::newRow("black hole") << "abc def" << "yiw\"_dwP" << "abcdef";
+}
+
+void TestVimInputHandler::builtinCommands()
+{
+    QFETCH(QString, input); QFETCH(QString, keys); QFETCH(QString, expected);
+    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    editor.setText(input); editor.setCursorPosition(0, 0); handler.setEnabled(true);
+    QTest::keyClicks(&editor, keys); QTest::keyClick(&editor, Qt::Key_Escape);
+    QCOMPARE(editor.text(), expected);
+}
+
+void TestVimInputHandler::repeatAndMacro()
+{
+    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    editor.setText("one two three"); editor.setCursorPosition(0, 0); handler.setEnabled(true);
+    QTest::keyClicks(&editor, "cwnew"); QTest::keyClick(&editor, Qt::Key_Escape);
+    QTest::keyClicks(&editor, "w."); QCOMPARE(editor.text(), QString("new new three"));
+    QTest::keyClicks(&editor, "u"); QCOMPARE(editor.text(), QString("new two three"));
+    editor.setText("abc\ndef\nghi"); editor.setCursorPosition(0, 0);
+    QTest::keyClicks(&editor, "qaxjq@a"); QCOMPARE(editor.text(), QString("bc\nef\nghi"));
+}
+
+void TestVimInputHandler::substitution()
+{
+    QsciScintilla editor; VimInputHandler handler(&editor);
+    editor.setText("foo foo\nFOO bar"); handler.setEnabled(true);
+    QVERIFY(handler.executeCommand("%s/foo/test/gi"));
+    QCOMPARE(editor.text(), QString("test test\ntest bar"));
+    editor.undo(); QCOMPARE(editor.text(), QString("foo foo\nFOO bar"));
+    QVERIFY(!handler.executeCommand("%s/foo/test/c"));
+    editor.setReadOnly(true); QVERIFY(!handler.executeCommand("%s/foo/test/g"));
+}

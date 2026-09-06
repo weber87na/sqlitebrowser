@@ -76,7 +76,7 @@ Controls and wizards are available for users to:
 
 ### Vim 中文操作說明
 
-請參閱 [完整中文操作說明](doc/vim-native.md)，內容包含啟用方式、常用指令、surround、巨集、暫存器、搜尋與取代，以及 `init.lua`／`init.vim` 設定。
+請參閱 [完整中文操作說明](doc/vim-builtin.md)，內容包含啟用方式、常用指令、surround、巨集、暫存器、搜尋與取代，以及 `init.lua`／`init.vim` 設定。
 
 程式保留兩種模式：
 

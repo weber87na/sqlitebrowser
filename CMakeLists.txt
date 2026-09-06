@@ -148,8 +148,6 @@ target_sources(${PROJECT_NAME}
     src/PlotDock.h
     src/FindReplaceDialog.h
     src/ExtendedScintilla.h
-    src/NvimInputHandler.h
-    src/NvimMessagePack.h
     src/VimInputHandler.h
     src/FileExtensionManager.h
     src/CondFormatManager.h
@@ -204,7 +202,6 @@ target_sources(${PROJECT_NAME}
     src/PlotDock.cpp
     src/FindReplaceDialog.cpp
     src/ExtendedScintilla.cpp
-    src/NvimInputHandler.cpp
     src/VimInputHandler.cpp
     src/FileExtensionManager.cpp
     src/CondFormatManager.cpp
@@ -272,7 +269,6 @@ target_sources(${PROJECT_NAME}
     # Styles
     src/qdarkstyle/dark/darkstyle.qrc
     src/qdarkstyle/light/lightstyle.qrc
-    src/vim/nvim.qrc
     src/dracula/dracula.qrc
 )
 

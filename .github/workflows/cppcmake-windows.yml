@@ -27,11 +27,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: sudo apt-get update && sudo apt-get install -y qtbase5-dev libqscintilla2-qt5-dev
-      - name: Install pinned Neovim
-        run: |
-          curl -fL https://github.com/neovim/neovim/releases/download/v0.12.5/nvim-linux-x86_64.tar.gz -o nvim.tar.gz
-          tar xzf nvim.tar.gz
-          echo "$PWD/nvim-linux-x86_64/bin" >> "$GITHUB_PATH"
       - run: cmake -S src/tests/vim-standalone -B vim-tests && cmake --build vim-tests
       - run: ctest --test-dir vim-tests --output-on-failure
   build:
@@ -213,14 +208,7 @@ jobs:
           } else {
             move target\System64\* "target\DB Browser for SQLite\"
           }
-          if ("${{ matrix.arch }}" -eq "x64") {
-            gh release download v0.12.5 --repo neovim/neovim --pattern nvim-win64.zip
-            Expand-Archive nvim-win64.zip -DestinationPath nvim-dist
-            Move-Item nvim-dist\nvim-win64 "target\DB Browser for SQLite\nvim"
-            & "target\DB Browser for SQLite\nvim\bin\nvim.exe" --version
-            if ($LASTEXITCODE -ne 0) { throw "Bundled Neovim failed to start" }
-          }
-          Copy-Item doc\vim-native.md "target\DB Browser for SQLite\VIM-README.md"
+          Copy-Item doc\vim-builtin.md "target\DB Browser for SQLite\VIM-README.md"
           Compress-Archive -Path "target\DB Browser for SQLite\*" -DestinationPath $FILENAME_FORMAT
 
       - if: github.event_name != 'pull_request'
@@ -297,7 +285,7 @@ jobs:
       contents: write
     uses: ./.github/workflows/release.yml
 
-  publish-native-prerelease:
+  publish-builtin-prerelease:
     if: github.event_name == 'push' && github.repository == 'weber87na/sqlitebrowser'
     needs: [vim-tests, build]
     runs-on: ubuntu-latest
@@ -314,7 +302,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: vim-neovim-${{ github.run_number }}
+          RELEASE_TAG: vim-builtin-${{ github.run_number }}
           BUILD_SHA: ${{ github.sha }}
         run: |
           current=$(gh api "repos/$GH_REPO/branches/vim-mode-windows" --jq .commit.sha)
@@ -327,15 +315,11 @@ jobs:
           for archive in dist/*.zip; do unzip -tq "$archive"; done
           (cd dist && sha256sum *.zip > SHA256SUMS.txt)
           cat > notes.md <<'NOTES'
-          Windows x64 免安裝 ZIP 已附 Neovim 0.12.5，提供較完整的 Vim 編輯功能。
+          Windows x64／x86 使用相同的內建 Vim 引擎，不需要安裝 Neovim，也不讀取 init.lua。
 
-          支援 J/gJ、`.` 重複操作、字元跳轉、縮排、矩形選取、標記、巨集、
-          暫存器、搜尋與批次取代、init.lua／init.vim，以及 surround。
-          保留 Dracula 預設佈景與現有字體設定。
-
-          啟用方式：偏好設定 → SQL，勾選 Vim editing mode 與 Full Vim engine。
-          x86 ZIP 未附 Neovim，使用指令較少的內建基本模式。
-          請閱讀 ZIP 內的 VIM-README.md 中文操作說明與整合限制。
-          此版本在內建 Vim 與 Neovim 整合測試通過後才進行 Windows 編譯。
+          加強 J/gJ、重複操作、巨集、暫存器、字元跳轉、縮排與大小寫編輯。
+          保留逗號 leader、zh/zl/z;/z,、surround、Dracula 與字體設定。
+          ZIP 內附 VIM-README.md 繁體中文操作說明，列出支援範圍與限制。
+          此版本通過內建 Vim 回歸測試後才進行 Windows 編譯。
           NOTES
-          gh release create "$RELEASE_TAG" --target vim-mode-windows --title "Vim + Neovim portable ($RELEASE_TAG)" --prerelease --notes-file notes.md dist/*.zip dist/SHA256SUMS.txt
+          gh release create "$RELEASE_TAG" --target vim-mode-windows --title "內建 Vim 免安裝版 ($RELEASE_TAG)" --prerelease --notes-file notes.md dist/*.zip dist/SHA256SUMS.txt

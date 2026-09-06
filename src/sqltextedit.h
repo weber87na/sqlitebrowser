@@ -5,7 +5,6 @@
 
 class SqlUiLexer;
 class VimInputHandler;
-class NvimInputHandler;
 class QLabel;
 class QResizeEvent;
 
@@ -35,7 +34,6 @@ private slots:
 private:
     VimInputHandler* m_vimInputHandler;
     QLabel* m_vimModeIndicator;
-    NvimInputHandler* m_nvimInputHandler;
 
 };
 
