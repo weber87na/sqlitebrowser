@@ -128,6 +128,7 @@ private:
     void indentLines(int first, int last, const QString& operation);
     bool m_forwarding = false;
     int m_replayDepth = 0;
+    int m_replayBudget = 0;
     bool m_groupOpen = false;
     QString m_changeBefore;
     Strokes m_sequence, m_lastChange;
@@ -136,6 +137,7 @@ private:
     QMap<QString, QPair<QString, bool>> m_registers;
     QString m_selectedRegister;
     QMap<QString, int> m_marks;
+    QByteArray m_trackedText;
     QString m_findCommand, m_findTarget;
     int m_savedAnchor = 0, m_savedCaret = 0;
     Mode m_savedVisualMode = Mode::Visual;

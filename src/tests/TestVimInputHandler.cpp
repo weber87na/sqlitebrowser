@@ -470,6 +470,7 @@ void TestVimInputHandler::builtinCommands_data()
     QTest::newRow("uppercase word") << "select from" << "gUw" << "SELECT from";
     QTest::newRow("lowercase line") << "SELECT FROM" << "guu" << "select from";
     QTest::newRow("visual uppercase") << "abc def" << "viwU" << "ABC def";
+    QTest::newRow("delete final word") << "abc def" << "wdw" << "abc ";
     QTest::newRow("delete before") << "abc" << "$X" << "ac";
     QTest::newRow("named register") << "abc def" << "\"ayiw$\"ap" << "abc defabc";
     QTest::newRow("black hole") << "abc def" << "yiw\"_dwP" << "abcdef";
@@ -504,6 +505,9 @@ void TestVimInputHandler::substitution()
     editor.undo(); QCOMPARE(editor.text(), QString("foo foo\nFOO bar"));
     QVERIFY(!handler.executeCommand("%s/foo/test/c"));
     editor.setReadOnly(true); QVERIFY(!handler.executeCommand("%s/foo/test/g"));
+    editor.setReadOnly(false); editor.setText("keep\nremove\nkeep\nremove");
+    QVERIFY(handler.executeCommand("g/remove/d")); QCOMPARE(editor.text(), QString("keep\nkeep\n"));
+    editor.undo(); QCOMPARE(editor.text(), QString("keep\nremove\nkeep\nremove"));
 }
 
 

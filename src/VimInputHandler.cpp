@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <limits>
 
 namespace
 {
@@ -59,6 +60,17 @@ VimInputHandler::VimInputHandler(QsciScintilla* editor, QObject* parent) :
     QString config = qEnvironmentVariable("DB4S_VIM_CONFIG");
     if(config.isEmpty()) config = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + "/vim.json";
     loadConfig(config);
+    m_trackedText = m_editor->text().toUtf8();
+    connect(m_editor, &QsciScintilla::textChanged, this, [this]() {
+        const QByteArray next = m_editor->text().toUtf8();
+        int first = 0, oldEnd = m_trackedText.size(), newEnd = next.size();
+        while(first < oldEnd && first < newEnd && m_trackedText.at(first) == next.at(first)) ++first;
+        while(oldEnd > first && newEnd > first && m_trackedText.at(oldEnd-1) == next.at(newEnd-1)) { --oldEnd; --newEnd; }
+        auto adjust = [&](int& position) { if(position >= oldEnd) position += newEnd-oldEnd; else if(position > first) position = first; };
+        for(auto it = m_marks.begin(); it != m_marks.end(); ++it) adjust(it.value());
+        for(int& position : m_jumps) adjust(position);
+        m_trackedText = next;
+    });
 }
 
 VimInputHandler::~VimInputHandler()
@@ -75,6 +87,8 @@ void VimInputHandler::setEnabled(bool enabled)
     if(m_enabled == enabled)
         return;
 
+    if(m_groupOpen) { m_editor->endUndoAction(); m_groupOpen = false; }
+    m_sequence.clear();
     m_enabled = enabled;
     resetPendingCommand();
     m_mappingPrefix.clear();
@@ -373,6 +387,27 @@ bool VimInputHandler::handleControlKey(QKeyEvent* event)
     const int count = takeCount();
     switch(event->key())
     {
+    case Qt::Key_A:
+    case Qt::Key_X:
+    {
+        if(m_editor->isReadOnly()) return true;
+        const int line = currentLine(); const QString value = m_editor->text(line);
+        const int byteOffset = currentPosition()-positionFromLine(line);
+        const int offset = QString::fromUtf8(value.toUtf8().left(byteOffset)).size();
+        auto matches = QRegularExpression("-?\\d+").globalMatch(value);
+        while(matches.hasNext())
+        {
+            auto match = matches.next(); if(match.capturedEnd() <= offset) continue;
+            bool ok; qlonglong number = match.captured().toLongLong(&ok);
+            const int delta = event->key() == Qt::Key_A ? count : -count;
+            if(!ok || (delta > 0 && number > std::numeric_limits<qlonglong>::max()-delta) ||
+               (delta < 0 && number < std::numeric_limits<qlonglong>::min()-delta)) return true;
+            int first = positionFromLine(line)+value.left(match.capturedStart()).toUtf8().size();
+            setSelection(first, first+match.captured().toUtf8().size());
+            m_editor->replaceSelectedText(QString::number(number+delta)); setPosition(first); return true;
+        }
+        return true;
+    }
     case Qt::Key_V:
         if(m_mode == Mode::VisualBlock) { setMode(Mode::Normal); setPosition(m_visualCaret); }
         else { m_visualAnchor = currentPosition(); m_visualCaret = currentPosition(); setMode(Mode::VisualBlock); updateVisualSelection(); }
@@ -1013,7 +1048,7 @@ bool VimInputHandler::move(const QString& command, int count)
             }
             setPosition(p);
         }
-        clampNormalCaret();
+        if(m_pendingCommand.isEmpty()) clampNormalCaret();
     }
     else if(command == "G")
     {
@@ -1642,8 +1677,12 @@ void VimInputHandler::updateVisualSelection()
     if(m_mode == Mode::VisualBlock)
     {
         m_editor->SendScintilla(QsciScintillaBase::SCI_SETSELECTIONMODE, QsciScintillaBase::SC_SEL_RECTANGLE);
-        m_editor->SendScintilla(QsciScintillaBase::SCI_SETRECTANGULARSELECTIONANCHOR, m_visualAnchor);
-        m_editor->SendScintilla(QsciScintillaBase::SCI_SETRECTANGULARSELECTIONCARET, positionAfter(m_visualCaret));
+        int anchorColumn = int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETCOLUMN, m_visualAnchor));
+        int caretColumn = int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETCOLUMN, m_visualCaret));
+        m_editor->SendScintilla(QsciScintillaBase::SCI_SETRECTANGULARSELECTIONANCHOR,
+            anchorColumn > caretColumn ? positionAfter(m_visualAnchor) : m_visualAnchor);
+        m_editor->SendScintilla(QsciScintillaBase::SCI_SETRECTANGULARSELECTIONCARET,
+            anchorColumn > caretColumn ? m_visualCaret : positionAfter(m_visualCaret));
         return;
     }
     m_editor->SendScintilla(QsciScintillaBase::SCI_SETSELECTIONMODE, QsciScintillaBase::SC_SEL_STREAM);
@@ -1794,10 +1833,12 @@ void VimInputHandler::replay(const Strokes& input, int count)
 {
     if(m_replayDepth >= 10 || input.size() > 10000) return;
     const Strokes keys = input;
+    if(m_replayDepth == 0) m_replayBudget = 10000;
     ++m_replayDepth;
     for(int n = 0; n < std::min(count, 10000 / std::max(1, keys.size())); ++n)
         for(const Stroke& stroke : keys)
         {
+            if(m_replayBudget-- <= 0) { --m_replayDepth; return; }
             QKeyEvent event(QEvent::KeyPress, stroke.key, stroke.modifiers, stroke.text);
             if(!handleKeyPress(&event))
             {
@@ -1896,6 +1937,25 @@ bool VimInputHandler::extendedPending(const QString& key)
     }
     if(pending == "g" && (key == "u" || key == "U" || key == "~"))
     { m_pendingCommand += key; return true; }
+    if(pending == "g" && (key == "e" || key == "E"))
+    {
+        int position = currentPosition();
+        auto category = [&](int p) { int c = characterClassAt(p); return key == "E" && c ? 1 : c; };
+        for(int i = 0; i < m_pendingCount; ++i)
+        {
+            int c = category(position);
+            while(position > 0 && category(positionBefore(position)) == c) position = positionBefore(position);
+            if(position > 0) position = positionBefore(position);
+            while(position > 0 && category(position) == 0) position = positionBefore(position);
+        }
+        setPosition(position); resetPendingCommand(); return true;
+    }
+    if(pending == "g" && key == "_")
+    {
+        int p = lineEndPosition(currentLine());
+        while(p > positionFromLine(currentLine()) && characterClassAt(positionBefore(p)) == 0) p = positionBefore(p);
+        setPosition(p > positionFromLine(currentLine()) ? positionBefore(p) : p); resetPendingCommand(); return true;
+    }
     if(pending == "g" && key == "J") { int count = m_pendingCount; resetPendingCommand(); joinLines(count, true); return true; }
     if(pending == "g" && key == "v")
     {
@@ -2024,6 +2084,20 @@ bool VimInputHandler::executeCommand(const QString& input)
     if(number && line > 0) { setPosition(positionFromLine(std::min(line-1, m_editor->lines()-1))); return true; }
     // Delimiters can be escaped. The regular-expression dialect is Qt/PCRE,
     // intentionally documented rather than silently pretending to be Vimscript.
+    if(command.startsWith("g/") || command.startsWith("v/"))
+    {
+        const int end = command.lastIndexOf('/');
+        if(end <= 1 || command.mid(end+1) != "d" || m_editor->isReadOnly()) return false;
+        QRegularExpression expression(command.mid(2, end-2)); if(!expression.isValid()) return false;
+        QVector<int> lines;
+        for(int n = 0; n < m_editor->lines(); ++n)
+            if(expression.match(m_editor->text(n)).hasMatch() != command.startsWith("v/")) lines.append(n);
+        if(lines.isEmpty()) return false;
+        m_editor->beginUndoAction();
+        m_pendingCommand = "d";
+        for(int i = lines.size()-1; i >= 0; --i) applyLineOperator(lines.at(i), lines.at(i));
+        resetPendingCommand(); m_editor->endUndoAction(); return true;
+    }
     int firstLine = currentLine(), lastLine = firstLine;
     if(command.startsWith('%')) { firstLine = 0; lastLine = m_editor->lines()-1; command.remove(0, 1); }
     const auto range = QRegularExpression("^(\\d+),(\\d+)").match(command);
@@ -2052,7 +2126,7 @@ bool VimInputHandler::executeCommand(const QString& input)
         for(int i = found.size()-1; i >= 0; --i)
         {
             const auto match = found.at(i); QString replacement = parts.at(1);
-            for(int group = 9; group >= 1; --group) replacement.replace("\\" + QString::number(group), match.captured(group));
+            for(int group = std::min(9, match.lastCapturedIndex()); group >= 1; --group) replacement.replace("\\" + QString::number(group), match.captured(group));
             replacement.replace("&", match.captured());
             value.replace(match.capturedStart(), match.capturedLength(), replacement); changed = true;
         }
