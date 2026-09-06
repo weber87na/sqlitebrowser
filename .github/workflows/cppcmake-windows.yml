@@ -5,6 +5,10 @@ on:
     branches: [vim-mode-windows]
     paths:
       - src/VimInputHandler.*
+      - src/Nvim*
+      - src/vim/**
+      - src/sqltextedit.*
+      - src/tests/TestNvimInputHandler.cpp
       - src/tests/TestVimInputHandler.*
       - src/tests/vim-standalone/**
   workflow_call:
@@ -23,6 +27,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: sudo apt-get update && sudo apt-get install -y qtbase5-dev libqscintilla2-qt5-dev
+      - name: Install pinned Neovim
+        run: |
+          curl -fL https://github.com/neovim/neovim/releases/download/v0.12.5/nvim-linux-x86_64.tar.gz -o nvim.tar.gz
+          tar xzf nvim.tar.gz
+          echo "$PWD/nvim-linux-x86_64/bin" >> "$GITHUB_PATH"
       - run: cmake -S src/tests/vim-standalone -B vim-tests && cmake --build vim-tests
       - run: ctest --test-dir vim-tests --output-on-failure
   build:
@@ -204,6 +213,14 @@ jobs:
           } else {
             move target\System64\* "target\DB Browser for SQLite\"
           }
+          if ("${{ matrix.arch }}" -eq "x64") {
+            gh release download v0.12.5 --repo neovim/neovim --pattern nvim-win64.zip
+            Expand-Archive nvim-win64.zip -DestinationPath nvim-dist
+            Move-Item nvim-dist\nvim-win64 "target\DB Browser for SQLite\nvim"
+            & "target\DB Browser for SQLite\nvim\bin\nvim.exe" --version
+            if ($LASTEXITCODE -ne 0) { throw "Bundled Neovim failed to start" }
+          }
+          Copy-Item doc\vim-native.md "target\DB Browser for SQLite\VIM-README.md"
           Compress-Archive -Path "target\DB Browser for SQLite\*" -DestinationPath $FILENAME_FORMAT
 
       - if: github.event_name != 'pull_request'
@@ -279,3 +296,39 @@ jobs:
       actions: read
       contents: write
     uses: ./.github/workflows/release.yml
+
+  publish-native-prerelease:
+    if: github.event_name == 'push' && github.repository == 'weber87na/sqlitebrowser'
+    needs: [vim-tests, build]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: build-artifacts-win-*
+          path: release-files
+          merge-multiple: true
+      - name: Publish verified portable ZIPs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: vim-neovim-${{ github.run_number }}
+        run: |
+          mkdir dist
+          cp release-files/*.zip dist/
+          for archive in dist/*.zip; do unzip -tq "$archive"; done
+          (cd dist && sha256sum *.zip > SHA256SUMS.txt)
+          cat > notes.md <<'NOTES'
+          Full Vim editing through bundled Neovim 0.12.5 (Windows x64 portable ZIP).
+
+          Native J/gJ, dot repeat, character motions, indentation, visual block, marks,
+          macros, registers, Ex substitutions/global commands, init.lua/init.vim,
+          and vim-surround. Default Dracula theme and existing font settings remain.
+
+          The x86 ZIP uses the basic built-in emulator; it does not bundle Neovim.
+          See VIM-README.md inside the ZIP for configuration and integration limits.
+          Built only after the legacy and native Qt integration tests pass.
+          NOTES
+          gh release create "$RELEASE_TAG" --target vim-mode-windows --title "Vim + Neovim portable ($RELEASE_TAG)" --prerelease --notes-file notes.md dist/*.zip dist/SHA256SUMS.txt

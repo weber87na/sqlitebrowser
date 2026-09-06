@@ -1933,6 +1933,15 @@ Can be set to 0 for disabling completion.</string>
            </property>
           </widget>
          </item>
+         <item row="12" column="0">
+          <widget class="QLabel" name="labelNativeVim"><property name="text"><string>Full Vim engine</string></property></widget>
+         </item>
+         <item row="12" column="1">
+          <widget class="QCheckBox" name="checkNativeVim">
+           <property name="text"><string>Use Neovim (bundled with Windows x64 ZIP)</string></property>
+           <property name="toolTip"><string>Supports native Vim commands, macros, registers, surround, and init.lua/init.vim. Disable to use the basic built-in emulator.</string></property>
+          </widget>
+         </item>
         </layout>
        </item>
       </layout>

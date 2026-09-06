@@ -1,0 +1,4 @@
+<RCC><qresource prefix="/vim">
+<file>bridge.lua</file>
+<file>surround.vim</file>
+</qresource></RCC>

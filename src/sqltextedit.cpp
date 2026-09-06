@@ -3,6 +3,9 @@
 #include "Settings.h"
 #include "SqlUiLexer.h"
 #include "VimInputHandler.h"
+#include "NvimInputHandler.h"
+#include <QAction>
+#include <algorithm>
 
 #include <Qsci/qscicommandset.h>
 #include <Qsci/qscicommand.h>
@@ -17,7 +20,8 @@ SqlUiLexer* SqlTextEdit::sqlLexer = nullptr;
 SqlTextEdit::SqlTextEdit(QWidget* parent) :
     ExtendedScintilla(parent),
     m_vimInputHandler(new VimInputHandler(this, this)),
-    m_vimModeIndicator(new QLabel(this))
+    m_vimModeIndicator(new QLabel(this)),
+    m_nvimInputHandler(new NvimInputHandler(this, this))
 {
     // Create lexer object if not done yet
     if(sqlLexer == nullptr)
@@ -65,6 +69,17 @@ SqlTextEdit::SqlTextEdit(QWidget* parent) :
     m_vimModeIndicator->hide();
     connect(m_vimInputHandler, &VimInputHandler::modeChanged, this, &SqlTextEdit::updateVimModeIndicator);
 
+    connect(m_nvimInputHandler, &NvimInputHandler::statusChanged, this, &SqlTextEdit::updateVimModeIndicator);
+    connect(m_nvimInputHandler, &NvimInputHandler::saveRequested, this, [this]() {
+        if(QAction* save = window()->findChild<QAction*>(QStringLiteral("actionSqlSaveFile"))) save->trigger();
+    });
+    connect(m_nvimInputHandler, &NvimInputHandler::failed, this, [this](const QString& message) {
+        m_vimModeIndicator->setToolTip(message);
+        // Text remains in the SQL editor if the native process is unavailable.
+        m_vimInputHandler->setEnabled(Settings::getValue("editor", "vim_mode").toBool());
+        updateVimModeIndicator();
+    });
+
     // Do rest of initialisation
     reloadSettings();
 }
@@ -84,7 +99,13 @@ void SqlTextEdit::reloadSettings()
     // Set wrap lines
     setWrapMode(static_cast<QsciScintilla::WrapMode>(Settings::getValue("editor", "wrap_lines").toInt()));
 
-    m_vimInputHandler->setEnabled(Settings::getValue("editor", "vim_mode").toBool());
+    const bool vim = Settings::getValue("editor", "vim_mode").toBool();
+    const bool native = vim && Settings::getValue("editor", "vim_native").toBool();
+    if(!native) m_nvimInputHandler->stop();
+    const bool started = native && m_nvimInputHandler->start();
+    m_vimInputHandler->setEnabled(vim && !started);
+    if(started) setAutoCompletionThreshold(0);
+    updateVimModeIndicator();
 
     ExtendedScintilla::reloadSettings();
 
@@ -124,6 +145,16 @@ void SqlTextEdit::resizeEvent(QResizeEvent* event)
 
 void SqlTextEdit::updateVimModeIndicator()
 {
+    if(m_nvimInputHandler->isActive())
+    {
+        m_vimModeIndicator->setText(m_nvimInputHandler->status());
+        m_vimModeIndicator->setToolTip(tr("Neovim configuration: %1").arg(NvimInputHandler::configDirectory()));
+        m_vimModeIndicator->setMaximumWidth(std::max(100, width()-16));
+        m_vimModeIndicator->adjustSize();
+        m_vimModeIndicator->move(8, height()-m_vimModeIndicator->height()-8);
+        m_vimModeIndicator->show(); m_vimModeIndicator->raise();
+        return;
+    }
     if(!m_vimInputHandler->isEnabled())
     {
         m_vimModeIndicator->hide();

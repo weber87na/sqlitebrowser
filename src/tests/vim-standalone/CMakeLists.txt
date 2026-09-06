@@ -11,3 +11,11 @@ target_link_libraries(test-vim-input PRIVATE Qt5::Widgets Qt5::Test Qt5::PrintSu
 enable_testing()
 add_test(NAME vim-regressions COMMAND test-vim-input)
 set_tests_properties(vim-regressions PROPERTIES TIMEOUT 60 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+set(CMAKE_AUTORCC ON)
+add_executable(test-nvim-input ../TestNvimInputHandler.cpp
+    ../../NvimInputHandler.cpp ../../NvimInputHandler.h ../../NvimMessagePack.h ../../vim/nvim.qrc)
+target_include_directories(test-nvim-input PRIVATE ../..)
+target_link_libraries(test-nvim-input PRIVATE Qt5::Widgets Qt5::Test Qt5::PrintSupport ${QSCI_LIBRARY})
+add_test(NAME nvim-integration COMMAND test-nvim-input)
+set_tests_properties(nvim-integration PROPERTIES TIMEOUT 180 ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
