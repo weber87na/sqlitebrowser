@@ -58,6 +58,7 @@ private:
     bool m_stopping = false;
     int m_epoch = 0;
     int m_lastCaret = -1;
+    int m_inputsPending = 0;
     qlonglong m_tick = -1;
     int m_buffer = -1;
     QString m_text;

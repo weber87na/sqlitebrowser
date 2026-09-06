@@ -54,7 +54,7 @@ bool NvimInputHandler::start(const QString& executable, const QString& config)
     const QString path = executable.isEmpty() ? executablePath() : executable;
     if(path.isEmpty()) return false;
     m_stopping = false; m_ready = false; m_received.clear(); m_replies.clear();
-    m_pendingKeys.clear(); m_text.clear(); m_tick=-1; m_buffer=-1; m_snapshotPending = false;
+    m_pendingKeys.clear(); m_text.clear(); m_inputsPending=0; m_tick=-1; m_buffer=-1; m_snapshotPending = false;
     m_config = config.isEmpty() ? configDirectory() : config;
     QDir().mkpath(m_config);
     m_status = tr("Starting Neovim…"); emit statusChanged();
@@ -153,6 +153,10 @@ void NvimInputHandler::notification(const QString& method, const QVariantList& a
 void NvimInputHandler::flushAction(bool execute)
 {
     if(!m_ready) return;
+    if(m_inputsPending > 0) {
+        QTimer::singleShot(10,this,[this,execute]() { flushAction(execute); });
+        return;
+    }
     synchronize();
     lua("return _G.db4s_snapshot(-1,-1)", {}, [this,execute](const QVariant& value, const QVariant& error) {
         if(!error.isValid()) {
@@ -198,13 +202,24 @@ void NvimInputHandler::input(const QString& keys)
     QString clipboard = QApplication::clipboard()->text();
     const QString kind = clipboard == m_clipboard ? m_clipboardKind : "v";
     if(kind == "V" && clipboard.endsWith('\n')) clipboard.chop(1);
-    lua("local text,kind,ro=...; vim.g.db4s_clipboard=text; vim.g.db4s_clipboard_kind=kind; "
-        "vim.bo.readonly=ro; vim.bo.modifiable=not ro", {clipboard, kind, m_editor->isReadOnly()});
-    request("nvim_input", {keys});
+    const bool clipboardChanged = QApplication::clipboard()->text() != m_clipboard;
+    if(clipboardChanged) { m_clipboard = QApplication::clipboard()->text(); m_clipboardKind = kind; }
+    ++m_inputsPending;
+    // nvim_input is a fast API: wait for deferred buffer/cursor updates before
+    // enqueueing keys, otherwise they can operate on the previous document.
+    lua("local text,kind,ro,changed=...; if changed then vim.g.db4s_clipboard=text; "
+        "vim.g.db4s_clipboard_kind=kind end; vim.bo.readonly=ro; vim.bo.modifiable=not ro",
+        {clipboard, kind, m_editor->isReadOnly(), clipboardChanged},
+        [this,keys](const QVariant&,const QVariant& error) {
+            if(error.isValid()) { --m_inputsPending; return; }
+            request("nvim_input", {keys}, [this](const QVariant&,const QVariant&) {
+                lua("return true", {}, [this](const QVariant&,const QVariant&) { --m_inputsPending; });
+            });
+        });
 }
 void NvimInputHandler::snapshot()
 {
-    if(!m_ready || m_snapshotPending) return;
+    if(!m_ready || m_snapshotPending || m_inputsPending > 0) return;
     synchronize();
     const int epoch = m_epoch;
     m_snapshotPending = true;

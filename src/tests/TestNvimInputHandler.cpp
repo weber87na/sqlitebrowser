@@ -133,12 +133,7 @@ void TestNvimInputHandler::externalEdits()
     NvimInputHandler nvim(&editor); QVERIFY(nvim.start(NvimInputHandler::executablePath(),config.path()));
     QTRY_VERIFY(nvim.isReady()); nvim.input("A!<Esc>"); QTRY_COMPARE(editor.text(),QString("old!"));
     editor.setText("new text"); editor.setCursorPosition(0,0);
-    nvim.input("dw");
-    QTest::qWait(400);
-    nvim.lua("return {lines=vim.api.nvim_buf_get_lines(0,0,-1,true),cursor=vim.api.nvim_win_get_cursor(0),mode=vim.fn.mode(1),message=vim.v.errmsg}", {},
-        [](const QVariant& value,const QVariant& error) { qWarning() << "external state" << value << error; });
-    QTest::qWait(200);
-    QTRY_COMPARE(editor.text(),QString("text"));
+    nvim.input("dw"); QTRY_COMPARE(editor.text(),QString("text"));
     nvim.stop(); QCOMPARE(editor.text(),QString("text"));
 }
 void TestNvimInputHandler::readonly()
@@ -163,10 +158,8 @@ void TestNvimInputHandler::scrolling()
     QVERIFY(half<page);
     QTest::keyClick(&editor,Qt::Key_U,Qt::ControlModifier); QTRY_COMPARE(line(),0L);
     QTest::keyClick(&editor,Qt::Key_F,Qt::ControlModifier); QTRY_VERIFY(line()>half);
-    QTest::keyClick(&editor,Qt::Key_B,Qt::ControlModifier); QTest::qWait(200);
-    nvim.lua("return {cursor=vim.api.nvim_win_get_cursor(0),mode=vim.fn.mode(1),top=vim.fn.line('w0'),message=vim.v.errmsg}",{},
-        [](const QVariant& value,const QVariant& error) { qWarning() << "scroll state" << value << error; });
-    QTest::qWait(200); QTRY_VERIFY(line()<half);
+    QTest::keyClick(&editor,Qt::Key_B,Qt::ControlModifier);
+    QTRY_COMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETFIRSTVISIBLELINE),0L);
     nvim.input("100Gzt"); QTRY_COMPARE(line(),99L);
     QTRY_COMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETFIRSTVISIBLELINE),99L);
     nvim.input("L"); QTRY_VERIFY(line()>99L);
