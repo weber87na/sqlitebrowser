@@ -97,10 +97,18 @@ void TestVimInputHandler::insertControlDeletion()
     QTest::keyClicks(&editor, "i");
     QTest::keyClick(&editor, Qt::Key_U, Qt::ControlModifier);
     QCOMPARE(editor.text(), QString("onetwo"));
+    QTest::keyClick(&editor, Qt::Key_Escape);
+    editor.setText("prefix suffix");
+    editor.setCursorPosition(0, 7);
+    QTest::keyClicks(&editor, "iadded");
+    QTest::keyClick(&editor, Qt::Key_U, Qt::ControlModifier);
+    QCOMPARE(editor.text(), QString("prefix suffix"));
+    QTest::keyClick(&editor, Qt::Key_U, Qt::ControlModifier);
+    QCOMPARE(editor.text(), QString("suffix"));
     editor.setReadOnly(true);
     QTest::keyClick(&editor, Qt::Key_H, Qt::ControlModifier);
     QTest::keyClick(&editor, Qt::Key_U, Qt::ControlModifier);
-    QCOMPARE(editor.text(), QString("onetwo"));
+    QCOMPARE(editor.text(), QString("suffix"));
 }
 
 void TestVimInputHandler::insertAndEscape()

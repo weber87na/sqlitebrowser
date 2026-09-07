@@ -182,7 +182,10 @@ bool VimInputHandler::handleKeyPress(QKeyEvent* event)
                 m_editor->SendScintilla(QsciScintillaBase::SCI_DELETEBACK);
             else
             {
-                setSelection(start, caret);
+                // Preserve text before this insertion when deleting newly typed text.
+                const int first = m_insertStart > start && m_insertStart < caret
+                    ? m_insertStart : start;
+                setSelection(first, caret);
                 m_editor->replaceSelectedText(QString());
             }
         }
