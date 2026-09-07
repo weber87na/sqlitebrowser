@@ -242,8 +242,10 @@ jobs:
           Copy-Item "doc\vim-builtin.md" "$portableDir\VIM-README.md"
 
           # Deploy Qt plugins and translations directly; PR builds do not create an MSI.
-          & "$env:QT_ROOT_DIR\bin\windeployqt.exe" --release --no-compiler-runtime --dir $portableDir $portableDir
-          if ($LASTEXITCODE -ne 0) { throw "windeployqt failed: $LASTEXITCODE" }
+          foreach ($exe in @("DB Browser for SQLite.exe", "DB Browser for SQLCipher.exe")) {
+            & "$env:QT_ROOT_DIR\bin\windeployqt.exe" --release --no-compiler-runtime --dir $portableDir "$portableDir\$exe"
+            if ($LASTEXITCODE -ne 0) { throw "windeployqt failed for ${exe}: $LASTEXITCODE" }
+          }
           # Use app-local CRT DLLs so extracting the ZIP is sufficient to run it.
           $crtDir = Join-Path $env:VCToolsRedistDir "${{ matrix.arch }}\Microsoft.VC142.CRT"
           Copy-Item "$crtDir\*.dll" $portableDir

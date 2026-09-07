@@ -85,6 +85,8 @@ Vimscript、Lua 外掛、LSP、終端機、完整視窗／buffer 管理及外部
 - Windows workflow 新增同 repository PR 的 unsigned portable ZIP；保留 7 天，含 SHA256。
 - 修正 Windows `--version` 訊息視窗造成的啟動測試阻塞，改以 `--quit` 載入後退出。
 - Windows 首輪 P2 CI 發現兩處測試的 Scintilla 多載在 MSVC 下有歧義，已改用明確 uintptr_t 型別。
+- 修正版 run 34169756329 的 x86／x64 SQLite 與 SQLCipher 全程式編譯、測試皆通過。
+- 該輪封裝發現 windeployqt 拒絕目錄參數，已改為逐一傳入兩個 EXE 的完整路徑。
 - 打包包含 SQLite／SQLCipher 執行檔、Qt、OpenSSL、VC runtime 及中文說明，並以移除開發 PATH 的方式檢查啟動。
 - PR 打包不會自動發布 Release，也不會合併分支；最終 ZIP 狀態以 CI 執行結果為準。
 
