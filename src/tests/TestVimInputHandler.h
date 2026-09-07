@@ -8,6 +8,9 @@ class TestVimInputHandler : public QObject
     Q_OBJECT
 
 private slots:
+    void lineStartMotions();
+    void backwardEndOperators();
+    void insertControlDeletion();
     void countedInsert();
     void numericAndSqlMappings();
     void blockEditing();

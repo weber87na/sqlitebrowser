@@ -18,6 +18,91 @@ void prepareEditor(QsciScintilla& editor)
 }
 }
 
+void TestVimInputHandler::lineStartMotions()
+{
+    QsciScintilla editor;
+    VimInputHandler handler(&editor);
+    editor.setText("  one\r\n    two\r\n three\r\nlast");
+    prepareEditor(editor);
+    handler.setEnabled(true);
+    editor.setCursorPosition(0, 3);
+    QTest::keyClicks(&editor, "2+");
+    int line, column;
+    editor.getCursorPosition(&line, &column);
+    QCOMPARE(line, 2); QCOMPARE(column, 1);
+    QTest::keyClicks(&editor, "-");
+    editor.getCursorPosition(&line, &column);
+    QCOMPARE(line, 1); QCOMPARE(column, 4);
+    QTest::keyClick(&editor, Qt::Key_Return);
+    editor.getCursorPosition(&line, &column);
+    QCOMPARE(line, 2); QCOMPARE(column, 1);
+    QTest::keyClicks(&editor, "gg2_");
+    editor.getCursorPosition(&line, &column);
+    QCOMPARE(line, 1); QCOMPARE(column, 4);
+    QTest::keyClicks(&editor, "ggd2_");
+    QCOMPARE(editor.text(), QString(" three\r\nlast"));
+    QTest::keyClicks(&editor, "u");
+    QCOMPARE(editor.text(), QString("  one\r\n    two\r\n three\r\nlast"));
+    QTest::keyClicks(&editor, "ggd");
+    QTest::keyClick(&editor, Qt::Key_Return);
+    QCOMPARE(editor.text(), QString(" three\r\nlast"));
+    QTest::keyClicks(&editor, "Gd-");
+    QCOMPARE(editor.text(), QString());
+}
+
+void TestVimInputHandler::backwardEndOperators()
+{
+    QsciScintilla editor;
+    VimInputHandler handler(&editor);
+    editor.setUtf8(true);
+    prepareEditor(editor);
+    handler.setEnabled(true);
+    editor.setText("one two three");
+    editor.setCursorPosition(0, 8);
+    QTest::keyClicks(&editor, "dge");
+    QCOMPARE(editor.text(), QString("one tw hree"));
+    QTest::keyClicks(&editor, "u");
+    editor.setCursorPosition(0, 8);
+    QTest::keyClicks(&editor, "d2ge");
+    QCOMPARE(editor.text(), QString("onhree"));
+    editor.setText("one.two three");
+    editor.setCursorPosition(0, 4);
+    QTest::keyClicks(&editor, "dgE");
+    QCOMPARE(editor.text(), QString("wo three"));
+    editor.setText(QString::fromUtf8("甲乙 丙丁"));
+    editor.setCursorPosition(0, 3);
+    QTest::keyClicks(&editor, "dge");
+    QCOMPARE(editor.text(), QString::fromUtf8("甲丁"));
+}
+
+void TestVimInputHandler::insertControlDeletion()
+{
+    QsciScintilla editor;
+    VimInputHandler handler(&editor);
+    prepareEditor(editor);
+    handler.setEnabled(true);
+    QTest::keyClicks(&editor, "iabc");
+    QTest::keyClick(&editor, Qt::Key_H, Qt::ControlModifier);
+    QCOMPARE(editor.text(), QString("ab"));
+    QTest::keyClicks(&editor, "z"); // Flush the pending custom-mapping prefix before deleting.
+    QTest::keyClick(&editor, Qt::Key_U, Qt::ControlModifier);
+    QCOMPARE(editor.text(), QString());
+    QVERIFY(handler.mode() == VimInputHandler::Mode::Insert);
+    QTest::keyClicks(&editor, "new");
+    QTest::keyClick(&editor, Qt::Key_Escape);
+    QTest::keyClicks(&editor, "u");
+    QCOMPARE(editor.text(), QString());
+    editor.setText("one\r\ntwo");
+    editor.setCursorPosition(1, 0);
+    QTest::keyClicks(&editor, "i");
+    QTest::keyClick(&editor, Qt::Key_U, Qt::ControlModifier);
+    QCOMPARE(editor.text(), QString("onetwo"));
+    editor.setReadOnly(true);
+    QTest::keyClick(&editor, Qt::Key_H, Qt::ControlModifier);
+    QTest::keyClick(&editor, Qt::Key_U, Qt::ControlModifier);
+    QCOMPARE(editor.text(), QString("onetwo"));
+}
+
 void TestVimInputHandler::insertAndEscape()
 {
     QsciScintilla editor;

@@ -27,6 +27,9 @@ constexpr int MaximumCount = 9999;
 
 QString commandKey(const QKeyEvent* event)
 {
+    if(event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter)
+        return "\r";
+
     // QKeyEvent::text() can remain lower-case for synthetic events and on some
     // keyboard layouts.  Letter commands must still distinguish v from V, etc.
     if(event->modifiers().testFlag(Qt::ShiftModifier) &&
@@ -161,10 +164,28 @@ bool VimInputHandler::handleKeyPress(QKeyEvent* event)
         return true;
     }
 
-    if(m_mode == Mode::Insert && event->key() == Qt::Key_W &&
-        event->modifiers().testFlag(Qt::ControlModifier))
+    if(m_mode == Mode::Insert && event->modifiers().testFlag(Qt::ControlModifier) &&
+       (event->key() == Qt::Key_W || event->key() == Qt::Key_H || event->key() == Qt::Key_U))
     {
-        m_editor->SendScintilla(QsciScintillaBase::SCI_DELWORDLEFT);
+        flushInsertMappingPrefix();
+        if(m_editor->isReadOnly()) return true;
+        if(event->key() == Qt::Key_W)
+            m_editor->SendScintilla(QsciScintillaBase::SCI_DELWORDLEFT);
+        else if(event->key() == Qt::Key_H)
+            m_editor->SendScintilla(QsciScintillaBase::SCI_DELETEBACK);
+        else
+        {
+            const int caret = currentPosition();
+            const int start = positionFromLine(currentLine());
+            // At column zero Ctrl+U joins with the preceding line, like Backspace.
+            if(caret == start)
+                m_editor->SendScintilla(QsciScintillaBase::SCI_DELETEBACK);
+            else
+            {
+                setSelection(start, caret);
+                m_editor->replaceSelectedText(QString());
+            }
+        }
         return true;
     }
 
@@ -980,6 +1001,29 @@ void VimInputHandler::clampNormalCaret()
 
 bool VimInputHandler::move(const QString& command, int count)
 {
+    if(command == "+" || command == "-" || command == "\r" || command == "_")
+    {
+        const int offset = command == "-" ? -count : command == "_" ? count - 1 : count;
+        const int line = std::max(0, std::min(m_editor->lines() - 1, currentLine() + offset));
+        setPosition(positionFromLine(line));
+        move("^", 1);
+        return true;
+    }
+    if(command == "ge" || command == "gE")
+    {
+        int position = currentPosition();
+        auto category = [&](int p) { int c = characterClassAt(p); return command == "gE" && c ? 1 : c; };
+        for(int i = 0; i < count; ++i)
+        {
+            const int c = category(position);
+            while(position > 0 && category(positionBefore(position)) == c)
+                position = positionBefore(position);
+            if(position > 0) position = positionBefore(position);
+            while(position > 0 && category(position) == 0) position = positionBefore(position);
+        }
+        setPosition(position);
+        return true;
+    }
     if(command == "(" || command == ")")
     {
         const QByteArray bytes = m_editor->text().toUtf8();
@@ -1363,6 +1407,14 @@ bool VimInputHandler::applyOperatorMotion(const QString& command, int count)
     const int start = currentPosition();
     const int startLine = currentLine();
 
+    if(command == "+" || command == "-" || command == "\r" || command == "_")
+    {
+        move(command, count);
+        const int targetLine = currentLine();
+        setPosition(start);
+        applyLineOperator(std::min(startLine, targetLine), std::max(startLine, targetLine));
+        return true;
+    }
     if(command == "j" || command == "k" || command == "G")
     {
         if(command == "G")
@@ -1407,7 +1459,7 @@ bool VimInputHandler::applyOperatorMotion(const QString& command, int count)
         target = positionAfter(target);
     int first = std::min(start, target);
     int last = std::max(start, target);
-    if(command == "%" && last < documentLength())
+    if((command == "%" || command == "ge" || command == "gE") && last < documentLength())
         last = positionAfter(last);
     applyCharacterOperator(first, last);
     return true;
@@ -1989,18 +2041,16 @@ bool VimInputHandler::extendedPending(const QString& key)
     }
     if(pending == "g" && (key == "u" || key == "U" || key == "~"))
     { m_pendingCommand += key; return true; }
-    if(pending == "g" && (key == "e" || key == "E"))
+    if(pending.endsWith("g") && (key == "e" || key == "E"))
     {
-        int position = currentPosition();
-        auto category = [&](int p) { int c = characterClassAt(p); return key == "E" && c ? 1 : c; };
-        for(int i = 0; i < m_pendingCount; ++i)
+        const int count = m_pendingCount * takeCount();
+        if(pending == "g") move("g" + key, count);
+        else
         {
-            int c = category(position);
-            while(position > 0 && category(positionBefore(position)) == c) position = positionBefore(position);
-            if(position > 0) position = positionBefore(position);
-            while(position > 0 && category(position) == 0) position = positionBefore(position);
+            m_pendingCommand.chop(1);
+            applyOperatorMotion("g" + key, count);
         }
-        setPosition(position); resetPendingCommand(); return true;
+        resetPendingCommand(); return true;
     }
     if(pending == "g" && key == "_")
     {
