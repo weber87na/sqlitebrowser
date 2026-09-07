@@ -48,6 +48,219 @@ bool isRegisterName(const QString& name)
     return name.size() == 1 &&
         QString("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\"-+*_").contains(name);
 }
+
+bool tagObjectRange(const QByteArray& text, int caret, bool around, int count,
+                    bool expanding, int selectionFirst, int selectionLast, int& first, int& last)
+{
+    struct Tag { QByteArray name; int first; int end; };
+    struct Pair { int first; int innerFirst; int innerLast; int last; };
+    QVector<Tag> stack;
+    QVector<Pair> pairs;
+    const int length = text.size();
+    const auto whitespace = [](char c) {
+        return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\f';
+    };
+    const auto nameStart = [](char c) {
+        const unsigned char value = static_cast<unsigned char>(c);
+        return (value >= 'A' && value <= 'Z') || (value >= 'a' && value <= 'z') ||
+               c == '_' || c == ':' || value >= 0x80;
+    };
+    const auto namePart = [&nameStart](char c) {
+        return nameStart(c) || (c >= '0' && c <= '9') || c == '-' || c == '.';
+    };
+    const auto foldedName = [](const QByteArray& name) {
+        // Vim's tag objects ignore case even for XML. Keep the original bytes
+        // untouched; folding is used only to match names and HTML void tags.
+        return QString::fromUtf8(name).toCaseFolded().toUtf8();
+    };
+    const QSet<QByteArray> voidTags = {"area", "base", "br", "col", "embed", "hr", "img",
+                                     "input", "link", "meta", "param", "source", "track", "wbr"};
+    const QSet<QByteArray> rawTags = {"script", "style", "textarea", "title"};
+    int p = 0;
+    while(p < length)
+    {
+        if(text.at(p) != '<') { ++p; continue; }
+        if(!stack.isEmpty() && rawTags.contains(stack.last().name))
+        {
+            // HTML raw/RCDATA elements only recognize their own closing tag.
+            // In particular, '<' in JavaScript and CSS isn't a nested element.
+            int nameEnd = p + 2;
+            if(p + 1 >= length || text.at(p + 1) != '/') { ++p; continue; }
+            while(nameEnd < length && namePart(text.at(nameEnd))) ++nameEnd;
+            if(foldedName(text.mid(p + 2, nameEnd - p - 2)) != stack.last().name ||
+               (nameEnd < length && text.at(nameEnd) != '>' && !whitespace(text.at(nameEnd))))
+            { ++p; continue; }
+        }
+        if(text.mid(p, 4) == "<!--")
+        {
+            const int end = text.indexOf("-->", p + 4);
+            if(end < 0) return false;
+            p = end + 3;
+            continue;
+        }
+        if(text.mid(p, 9) == "<![CDATA[")
+        {
+            const int end = text.indexOf("]]>", p + 9);
+            if(end < 0) return false;
+            p = end + 3;
+            continue;
+        }
+        if(text.mid(p, 2) == "<?")
+        {
+            // XML PIs end at the first ?>; quotes in their contents have no
+            // syntactic meaning (unlike quoted values in start tags).
+            int targetEnd = p + 2;
+            if(targetEnd >= length || !nameStart(text.at(targetEnd))) return false;
+            while(targetEnd < length && namePart(text.at(targetEnd))) ++targetEnd;
+            if(targetEnd < length && !whitespace(text.at(targetEnd)) && text.mid(targetEnd, 2) != "?>")
+                return false;
+            const int end = text.indexOf("?>", targetEnd);
+            if(end < 0) return false;
+            p = end + 2;
+            continue;
+        }
+        if(text.mid(p, 2) == "<!")
+        {
+            int q = p + 2;
+            if(q >= length || !nameStart(text.at(q))) return false;
+            int brackets = 0;
+            char quote = 0;
+            bool closed = false;
+            for(; q < length; ++q)
+            {
+                const char c = text.at(q);
+                if(quote) { if(c == quote) quote = 0; continue; }
+                if(c == '\'' || c == '"') { quote = c; continue; }
+                if(text.mid(q, 4) == "<!--")
+                {
+                    const int end = text.indexOf("-->", q + 4);
+                    if(end < 0) return false;
+                    q = end + 2;
+                    continue;
+                }
+                if(c == '[') ++brackets;
+                if(c == ']' && --brackets < 0) return false;
+                if(c == '>' && brackets == 0)
+                {
+                    p = q + 1;
+                    closed = true;
+                    break;
+                }
+            }
+            if(!closed) return false;
+            continue;
+        }
+        const int tagFirst = p;
+        int q = p + 1;
+        const bool closing = q < length && text.at(q) == '/';
+        if(closing) ++q;
+        if(q >= length || !nameStart(text.at(q)))
+        {
+            // A literal comparison such as 'a < b' isn't markup. A malformed
+            // closing tag is ambiguous and must not cause an edit.
+            if(closing) return false;
+            ++p;
+            continue;
+        }
+        const int nameFirst = q++;
+        while(q < length && namePart(text.at(q))) ++q;
+        const QByteArray name = foldedName(text.mid(nameFirst, q - nameFirst));
+        bool selfClosing = false;
+        bool closed = false;
+        QSet<QByteArray> attributes;
+        while(q < length)
+        {
+            const int beforeWhitespace = q;
+            while(q < length && whitespace(text.at(q))) ++q;
+            if(q >= length) return false;
+            if(text.at(q) == '>') { ++q; closed = true; break; }
+            if(!closing && text.at(q) == '/' && q + 1 < length && text.at(q + 1) == '>')
+            { q += 2; selfClosing = true; closed = true; break; }
+            if(closing || q == beforeWhitespace || !nameStart(text.at(q))) return false;
+            const int attributeFirst = q++;
+            while(q < length && namePart(text.at(q))) ++q;
+            const QByteArray attribute = foldedName(text.mid(attributeFirst, q - attributeFirst));
+            if(attributes.contains(attribute)) return false;
+            attributes.insert(attribute);
+            const int attributeEnd = q;
+            while(q < length && whitespace(text.at(q))) ++q;
+            if(q >= length) return false;
+            if(text.at(q) != '=')
+            {
+                q = attributeEnd; // A boolean HTML attribute; preserve its following whitespace.
+                continue;
+            }
+            ++q;
+            while(q < length && whitespace(text.at(q))) ++q;
+            if(q >= length) return false;
+            if(text.at(q) == '\'' || text.at(q) == '"')
+            {
+                const char quote = text.at(q++);
+                while(q < length && text.at(q) != quote) ++q;
+                if(q == length) return false;
+                ++q;
+            }
+            else
+            {
+                const int valueFirst = q;
+                while(q < length && !whitespace(text.at(q)) && text.at(q) != '>' &&
+                      !(text.at(q) == '/' && q + 1 < length && text.at(q + 1) == '>'))
+                {
+                    if(text.at(q) == '<' || text.at(q) == '=' || text.at(q) == '"' ||
+                       text.at(q) == '\'' || text.at(q) == '`') return false;
+                    ++q;
+                }
+                if(q == valueFirst) return false;
+            }
+        }
+        if(!closed) return false;
+        if(closing)
+        {
+            // No browser-style repair: mismatched, missing, or stray closing
+            // tags invalidate the scan, including matches completed earlier.
+            if(stack.isEmpty() || stack.last().name != name) return false;
+            const Tag open = stack.takeLast();
+            pairs.append({open.first, open.end, tagFirst, q});
+        }
+        else if(!selfClosing && !voidTags.contains(name))
+            stack.append({name, tagFirst, q});
+        p = q;
+    }
+    if(!stack.isEmpty()) return false;
+
+    // A stack scan completes nested pairs before their parents, so enclosing
+    // matches are naturally ordered from the innermost to the outermost pair.
+    for(const Pair& pair : pairs)
+    {
+        if(caret < pair.first || caret >= pair.last) continue;
+        int begin = around ? pair.first : pair.innerFirst;
+        int end = around ? pair.last : pair.innerLast;
+        if(expanding)
+        {
+            if(selectionFirst < pair.first || selectionLast > pair.last) continue;
+            if(!around && begin >= selectionFirst && end <= selectionLast)
+            {
+                begin = pair.first;
+                end = pair.last;
+            }
+            if(begin > selectionFirst || end < selectionLast ||
+               (begin == selectionFirst && end == selectionLast)) continue;
+        }
+        if(--count == 0)
+        {
+            first = begin;
+            last = end;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool isMotionOperator(const QString& operation)
+{
+    return operation == "d" || operation == "c" || operation == "y" || operation == "gu" ||
+        operation == "gU" || operation == "g~" || operation == ">" || operation == "<" || operation == "=";
+}
 }
 
 VimInputHandler::VimInputHandler(QsciScintilla* editor, QObject* parent) :
@@ -72,7 +285,17 @@ VimInputHandler::VimInputHandler(QsciScintilla* editor, QObject* parent) :
     if(config.isEmpty()) config = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + "/vim.json";
     loadConfig(config);
     m_trackedText = m_editor->text().toUtf8();
+    // Cancel before unrelated edits so cached match positions are never used
+    // on new text. Host actions that already opened a nested undo group retain
+    // that group; ordinary edits begin after our confirmation group is closed.
+    connect(m_editor, &QsciScintillaBase::SCN_MODIFIED, this,
+        [this](int, int modification, const char*, int, int, int, int, int, int, int) {
+            if(m_substituteActive && !m_substituteChanging &&
+               (modification & (QsciScintillaBase::SC_MOD_BEFOREINSERT | QsciScintillaBase::SC_MOD_BEFOREDELETE)))
+                finishSubstituteConfirmation(false);
+        });
     connect(m_editor, &QsciScintilla::textChanged, this, [this]() {
+        if(m_substituteActive && !m_substituteChanging) finishSubstituteConfirmation(false);
         if(!m_completionChanging) resetInsertCompletion();
         const QByteArray next = m_editor->text().toUtf8();
         int first = 0, oldEnd = m_trackedText.size(), newEnd = next.size();
@@ -98,6 +321,7 @@ VimInputHandler::~VimInputHandler()
 {
     if(m_editor)
     {
+        finishSubstituteConfirmation(false);
         if(m_groupOpen) m_editor->endUndoAction();
         m_editor->removeEventFilter(this);
     }
@@ -108,8 +332,10 @@ void VimInputHandler::setEnabled(bool enabled)
     if(m_enabled == enabled)
         return;
 
+    finishSubstituteConfirmation(false);
     if(m_groupOpen) { m_editor->endUndoAction(); m_groupOpen = false; }
     m_sequence.clear();
+    m_insertPauses.clear();
     m_enabled = enabled;
     m_insertRegisterPending = false;
     m_selectedRegister.clear();
@@ -133,6 +359,29 @@ VimInputHandler::Mode VimInputHandler::mode() const
 
 bool VimInputHandler::eventFilter(QObject* watched, QEvent* event)
 {
+    if(m_substituteActive && (watched == m_editor || watched == m_substitutePrompt))
+    {
+        if(event->type() == QEvent::ShortcutOverride)
+        { event->accept(); return true; }
+        if(event->type() == QEvent::KeyPress)
+            return handleSubstituteConfirmation(static_cast<QKeyEvent*>(event));
+        if(watched == m_editor && (event->type() == QEvent::MouseButtonPress ||
+           event->type() == QEvent::MouseButtonDblClick || event->type() == QEvent::InputMethod))
+            finishSubstituteConfirmation(false);
+        if(watched == m_editor && event->type() == QEvent::Resize)
+            m_substitutePrompt->setGeometry(4, m_editor->height()-32, std::max(60, m_editor->width()-8), 28);
+    }
+    if(watched == m_commandLine && !m_insertPauses.isEmpty() && event->type() == QEvent::KeyPress)
+    {
+        const int key = static_cast<QKeyEvent*>(event)->key();
+        if(key == Qt::Key_Return || key == Qt::Key_Enter)
+        {
+            // QLineEdit can propagate Return after emitting returnPressed. Once
+            // CTRL-O resumes Insert, that same event must not insert a newline.
+            QMetaObject::invokeMethod(m_commandLine, "returnPressed", Qt::DirectConnection);
+            return true;
+        }
+    }
     if(m_forwarding || !m_enabled || watched != m_editor)
         return QObject::eventFilter(watched, event);
 
@@ -157,6 +406,116 @@ bool VimInputHandler::eventFilter(QObject* watched, QEvent* event)
 }
 
 bool VimInputHandler::handleKeyPress(QKeyEvent* event)
+{
+    ++m_keyDispatchDepth;
+    const int pauses = m_insertPauses.size();
+    const QString pending = m_pendingCommand;
+    const QString key = commandKey(event);
+    const bool history = m_mode == Mode::Normal && pending.isEmpty() &&
+        (key == "u" || (event->key() == Qt::Key_R && event->modifiers().testFlag(Qt::ControlModifier)));
+    if(m_replayDepth > 0)
+    {
+        if(history && m_groupOpen) { m_editor->endUndoAction(); m_groupOpen = false; }
+        if(!history && !m_groupOpen) { m_editor->beginUndoAction(); m_groupOpen = true; }
+    }
+    bool handled = handleKeyPressImpl(event);
+    if(!handled && pauses > 0 && m_insertPauses.size() == pauses &&
+       m_insertPauses.last().depth == m_keyDispatchDepth)
+    {
+        m_forwarding = true;
+        QCoreApplication::sendEvent(m_editor, event);
+        m_forwarding = false;
+        handled = true;
+    }
+    // A mapping or macro can run several strokes inside one Normal command.
+    // Only the dispatch level which entered CTRL-O may complete that pause.
+    if(pauses > 0 && m_insertPauses.size() == pauses &&
+       m_insertPauses.last().depth == m_keyDispatchDepth &&
+       (m_mode == Mode::Normal || m_mode == Mode::Insert) &&
+       m_pendingCommand.isEmpty() && m_mappingPrefix.isEmpty() && m_count == 0 &&
+       pending != "\"" && !m_substituteActive && (!m_commandLine || m_commandLine->isHidden()))
+        finishTemporaryNormal(key, history, pending);
+    --m_keyDispatchDepth;
+    return handled;
+}
+
+void VimInputHandler::beginTemporaryNormal()
+{
+    flushInsertMappingPrefix();
+    finishBlockInsert();
+    // CTRL-O ends the current insertion's undo block and cancels its count.
+    m_insertRepeat = 1;
+    m_repeatNewline = false;
+    if(m_replayDepth == 0)
+    {
+        if(!m_sequence.isEmpty()) m_sequence.removeLast();
+        m_sequence.append({Qt::Key_Escape, Qt::NoModifier, QString()});
+        finishChangeSequence(QString(), false);
+    }
+    else if(m_groupOpen) { m_editor->endUndoAction(); m_groupOpen = false; }
+    const int caret = currentPosition();
+    m_insertPauses.append({m_keyDispatchDepth, currentLine(), caret,
+        int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETCOLUMN, caret)),
+        m_replace, caret == lineEndPosition(currentLine())});
+    resetPendingCommand();
+    m_selectedRegister.clear();
+    m_replace = false;
+    m_editor->setOverwriteMode(false);
+    // Do not finalize counted insertion or shift the cursor like Escape does.
+    m_mode = Mode::Normal;
+    m_editor->SendScintilla(QsciScintillaBase::SCI_SETCARETSTYLE, QsciScintillaBase::CARETSTYLE_BLOCK);
+    clampNormalCaret();
+    emit modeChanged();
+    m_changeBefore = m_editor->text();
+}
+
+void VimInputHandler::finishTemporaryNormal(const QString& key, bool history, const QString& pending)
+{
+    if(m_insertPauses.isEmpty()) return;
+    const InsertPause pause = m_insertPauses.takeLast();
+    m_selectedRegister.clear();
+    if(m_mode == Mode::Insert)
+    {
+        // i/a/c/o/R explicitly choose the next insertion mode; they do not nest.
+        return;
+    }
+    if(m_mode != Mode::Normal) return;
+    const bool changed = m_editor->text() != m_changeBefore;
+    const int lineEnd = lineEndPosition(currentLine());
+    if((pending == "y" && (key == "y" || key == "j" || key == "k" || key == "+" ||
+        key == "-" || key == "_" || key == "\r" || key == "G")) || (pending == "yg" && key == "g"))
+    {
+        // A linewise yank preserves the original column when insertion resumes.
+        setPosition(int(m_editor->SendScintilla(QsciScintillaBase::SCI_FINDCOLUMN,
+                                                currentLine(), pause.column)));
+    }
+    else if(pending.isEmpty() && (key == "j" || key == "k") && pause.atEnd)
+    {
+        // The original insertion column can be one past the last character.
+        setPosition(int(m_editor->SendScintilla(QsciScintillaBase::SCI_FINDCOLUMN,
+                                                currentLine(), pause.column)));
+    }
+    else if((pending.isEmpty() && key == "$") ||
+            (currentLine() == pause.line && currentPosition() == positionBefore(lineEnd) &&
+             (pause.atEnd || (changed && pause.position >= lineEnd))))
+        setPosition(lineEnd);
+    if(m_replayDepth == 0)
+        finishChangeSequence(key, history);
+    else if(m_groupOpen) { m_editor->endUndoAction(); m_groupOpen = false; }
+    setMode(Mode::Insert);
+    m_replace = pause.replace;
+    m_editor->setOverwriteMode(m_replace);
+    if(m_replayDepth == 0)
+    {
+        // Dot repeats the insertion after CTRL-O, as a new Insert/Replace run.
+        m_sequence.append({m_replace ? Qt::Key_R : Qt::Key_I,
+                           m_replace ? Qt::ShiftModifier : Qt::NoModifier,
+                           m_replace ? QString("R") : QString("i")});
+        m_changeBefore = m_editor->text();
+    }
+}
+
+bool VimInputHandler::handleKeyPressImpl(QKeyEvent* event)
 {
     const bool completionKey = m_mode == Mode::Insert && !m_insertRegisterPending && event->modifiers() == Qt::ControlModifier &&
         (event->key() == Qt::Key_N || event->key() == Qt::Key_P);
@@ -190,6 +549,13 @@ bool VimInputHandler::handleKeyPress(QKeyEvent* event)
         return true;
     }
 
+    if(m_mode == Mode::Insert && event->key() == Qt::Key_O &&
+       event->modifiers() == Qt::ControlModifier)
+    {
+        beginTemporaryNormal();
+        return true;
+    }
+
     if(escape)
     {
         finishBlockInsert();
@@ -214,6 +580,14 @@ bool VimInputHandler::handleKeyPress(QKeyEvent* event)
         }
         resetPendingCommand();
         m_selectedRegister.clear();
+        return true;
+    }
+
+    if(m_mode == Mode::Insert && event->modifiers() == Qt::ControlModifier &&
+       (event->key() == Qt::Key_T || event->key() == Qt::Key_D))
+    {
+        flushInsertMappingPrefix();
+        indentInsert(event->key() == Qt::Key_T);
         return true;
     }
 
@@ -259,6 +633,101 @@ bool VimInputHandler::handleKeyPress(QKeyEvent* event)
         return handleVisualKey(event);
 
     return handleNormalKey(event);
+}
+
+void VimInputHandler::indentInsert(bool increase)
+{
+    if(m_editor->isReadOnly() || m_editor->hasSelectedText()) return;
+    const int line = currentLine();
+    const int caret = currentPosition();
+    const int oldEnd = int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETLINEINDENTPOSITION, line));
+    int width = m_editor->indentationWidth();
+    if(width <= 0) width = m_editor->tabWidth();
+    width = std::max(1, width);
+    const int indentation = m_editor->indentation(line);
+    const int target = increase ? (indentation / width + 1) * width
+                               : std::max(0, (indentation - 1) / width * width);
+    m_editor->setIndentation(line, target);
+    const int newEnd = int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETLINEINDENTPOSITION, line));
+    const int delta = newEnd - oldEnd;
+    setPosition(caret >= oldEnd ? caret + delta : newEnd);
+    if(m_insertBackspaceStart >= oldEnd) m_insertBackspaceStart += delta;
+    else m_insertBackspaceStart = std::min(m_insertBackspaceStart, newEnd);
+    // Existing indentation was edited, so this is no longer a simple counted insertion.
+    m_insertRepeat = 1;
+    for(ReplaceEdit& edit : m_replaceEdits)
+        if(edit.start >= oldEnd) edit.start += delta;
+}
+
+void VimInputHandler::foldCommand(const QString& command, int count)
+{
+    const auto parent = [this](int line) {
+        return int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETFOLDPARENT, line));
+    };
+    const auto isHeader = [this](int line) {
+        return (m_editor->SendScintilla(QsciScintillaBase::SCI_GETFOLDLEVEL, line) &
+                QsciScintillaBase::SC_FOLDLEVELHEADERFLAG) != 0;
+    };
+    const auto expanded = [this](int line) {
+        return m_editor->SendScintilla(QsciScintillaBase::SCI_GETFOLDEXPANDED, line) != 0;
+    };
+    if(command == "zv")
+    {
+        m_editor->SendScintilla(QsciScintillaBase::SCI_ENSUREVISIBLE, currentLine());
+        return;
+    }
+    if(command == "zR" || command == "zM")
+    {
+        m_editor->SendScintilla(QsciScintillaBase::SCI_FOLDALL,
+            command == "zR" ? QsciScintillaBase::SC_FOLDACTION_EXPAND : QsciScintillaBase::SC_FOLDACTION_CONTRACT);
+    }
+    else
+    {
+        int line = isHeader(currentLine()) ? currentLine() : parent(currentLine());
+        if(line < 0) return;
+        const bool open = command == "zo" || command == "zO" || (command == "za" && !expanded(line));
+        const bool recursive = command == "zO" || command == "zC";
+        for(int n = 0; n < count && line >= 0; ++n)
+        {
+            if(open)
+            {
+                // Open the outermost closed ancestor first when the caret was hidden.
+                int closed = expanded(line) ? -1 : line;
+                for(int ancestor = parent(line); ancestor >= 0; ancestor = parent(ancestor))
+                    if(!expanded(ancestor)) closed = ancestor;
+                if(closed >= 0) line = closed;
+            }
+            else if(!recursive)
+                while(line >= 0 && !expanded(line)) line = parent(line);
+            if(line < 0) break;
+            const int action = open ? QsciScintillaBase::SC_FOLDACTION_EXPAND : QsciScintillaBase::SC_FOLDACTION_CONTRACT;
+            if(recursive) m_editor->SendScintilla(QsciScintillaBase::SCI_FOLDCHILDREN, line, action);
+            else if(open && count > 1)
+            {
+                const int level = int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETFOLDLEVEL, line)) &
+                                  QsciScintillaBase::SC_FOLDLEVELNUMBERMASK;
+                const int last = int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETLASTCHILD, line, -1));
+                for(int child = line + 1; child <= last; ++child)
+                {
+                    const int childLevel = int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETFOLDLEVEL, child)) &
+                                           QsciScintillaBase::SC_FOLDLEVELNUMBERMASK;
+                    if(isHeader(child) && childLevel - level < count)
+                        m_editor->SendScintilla(QsciScintillaBase::SCI_FOLDLINE, child, action);
+                }
+            }
+            m_editor->SendScintilla(QsciScintillaBase::SCI_FOLDLINE, line, action);
+            if(open || recursive) break;
+            line = parent(line);
+        }
+    }
+    int visible = currentLine();
+    while(visible >= 0 && !m_editor->SendScintilla(QsciScintillaBase::SCI_GETLINEVISIBLE, visible))
+        visible = parent(visible);
+    if(visible >= 0 && visible != currentLine())
+    {
+        setPosition(positionFromLine(visible));
+        move("^", 1);
+    }
 }
 
 void VimInputHandler::resetInsertCompletion()
@@ -380,15 +849,17 @@ bool VimInputHandler::handleCustomMapping(QKeyEvent* event)
     if(isCustomMappingPrefix(candidate))
     {
         m_mappingPrefix = candidate;
-        if(m_mode == Mode::Insert)
+        if(m_mode == Mode::Insert || (m_mode != Mode::Normal && candidate == ";"))
             m_mappingTimer->start();
+        else
+            m_mappingTimer->stop();
         return true;
     }
 
     if(m_mappingPrefix.isEmpty())
         return false;
 
-    if(m_mode == Mode::Insert)
+    if(m_mode == Mode::Insert || (m_mode != Mode::Normal && m_mappingPrefix == ";"))
         flushInsertMappingPrefix();
     else
         m_mappingPrefix.clear();
@@ -397,8 +868,10 @@ bool VimInputHandler::handleCustomMapping(QKeyEvent* event)
     if(isCustomMappingPrefix(key))
     {
         m_mappingPrefix = key;
-        if(m_mode == Mode::Insert)
+        if(m_mode == Mode::Insert || (m_mode != Mode::Normal && key == ";"))
             m_mappingTimer->start();
+        else
+            m_mappingTimer->stop();
         return true;
     }
 
@@ -412,7 +885,8 @@ bool VimInputHandler::isCustomMappingPrefix(const QString& mapping) const
         mappings = QStringList() << ",," << "z;" << "zh" << "zl" << "z,";
     else if(m_mode == Mode::Normal)
         mappings = QStringList() << ",," << ",ss" << ",ci" << ",xs" << ",xm" << ",xf"
-                                 << "zh" << "zl" << "z;" << "z," << "zz" << "zt" << "zb";
+                                 << "zh" << "zl" << "z;" << "z," << "zz" << "zt" << "zb"
+                                 << "za" << "zo" << "zc" << "zO" << "zC" << "zR" << "zM" << "zv";
     else
         mappings = QStringList() << ",," << ",aa" << ",ci" << ",ss" << ";h" << ";q";
 
@@ -462,6 +936,12 @@ bool VimInputHandler::executeCustomMapping(const QString& mapping)
         setMode(Mode::Normal); return true;
     }
     if(m_mode == Mode::Normal && mapping == ",xm") { promptCommand(); return true; }
+    if(m_mode == Mode::Normal && mapping.size() == 2 && mapping.at(0) == 'z' &&
+       QStringLiteral("aocOCRMv").contains(mapping.at(1)))
+    {
+        foldCommand(mapping, takeCount());
+        return true;
+    }
     if(m_mode == Mode::Normal && (mapping == "zz" || mapping == "zt" || mapping == "zb"))
     {
         int visible = int(m_editor->SendScintilla(QsciScintillaBase::SCI_VISIBLEFROMDOCLINE, currentLine()));
@@ -579,6 +1059,11 @@ void VimInputHandler::flushInsertMappingPrefix()
     m_mappingTimer->stop();
     const QString prefix = m_mappingPrefix;
     m_mappingPrefix.clear();
+    if(m_mode != Mode::Insert && m_mode != Mode::Normal && prefix == ";")
+    {
+        repeatFindMotion(false, takeCount());
+        return;
+    }
     if(m_mode == Mode::Insert && !m_editor->isReadOnly())
         for(const QChar character : prefix)
         {
@@ -885,8 +1370,15 @@ bool VimInputHandler::handlePendingKey(QKeyEvent* event)
     if(extendedPending(key)) return true;
     if(handleSurroundKey(key)) return true;
     if(QString("fFtT").contains(key) && key.size() == 1 &&
-       (m_pendingCommand == "d" || m_pendingCommand == "c" || m_pendingCommand == "y"))
+       isMotionOperator(m_pendingCommand))
     { m_pendingCommand += key; return true; }
+    if(key == ";" && isMotionOperator(m_pendingCommand))
+    {
+        repeatFindMotion(false, m_pendingCount * takeCount(), m_pendingCommand);
+        m_selectedRegister.clear();
+        resetPendingCommand();
+        return true;
+    }
     if(key == "s" && (m_pendingCommand == "y" || m_pendingCommand == "c" || m_pendingCommand == "d"))
     {
         m_pendingCommand += "s";
@@ -915,25 +1407,10 @@ bool VimInputHandler::handlePendingKey(QKeyEvent* event)
         return true;
     }
 
-    if(m_pendingCommand == "g")
+    if(m_pendingCommand.endsWith("g"))
     {
-        if(key == "g")
-        {
-            const int line = std::max(0, std::min(m_editor->lines() - 1, m_pendingCount - 1));
-            m_editor->setCursorPosition(line, 0);
-            clampNormalCaret();
-        }
-        resetPendingCommand();
-        return true;
-    }
-
-    if(m_pendingCommand.length() == 2 && m_pendingCommand.endsWith("g"))
-    {
-        if(key == "g")
-        {
-            const int originalLine = currentLine();
-            applyLineOperator(0, originalLine);
-        }
+        // Recognized g motions are routed by extendedPending before this fallback.
+        m_selectedRegister.clear();
         resetPendingCommand();
         return true;
     }
@@ -959,10 +1436,24 @@ bool VimInputHandler::handlePendingKey(QKeyEvent* event)
 bool VimInputHandler::handleVisualKey(QKeyEvent* event)
 {
     const QString key = commandKey(event);
+    if(m_pendingCommand.size() == 1 && QString("fFtT").contains(m_pendingCommand))
+        return extendedPending(key); // The target can be a digit or a command letter.
+    if(m_pendingCommand == "g")
+    {
+        if(handleGMotion(key)) return true;
+        if(key.size() == 1 && key.at(0).isDigit() && !(key == "0" && m_count == 0))
+        {
+            m_count = std::min(MaximumCount, m_count * 10 + key.toInt());
+            return true;
+        }
+        resetPendingCommand();
+        if(key != "u" && key != "U" && key != "~") return true;
+    }
     if(m_pendingCommand == "vi" || m_pendingCommand == "va")
     {
         setPosition(m_visualCaret);
-        applyTextObject(key, m_pendingCommand == "va", takeCount());
+        if(!applyTextObject(key, m_pendingCommand == "va", takeCount()))
+            updateVisualSelection();
         resetPendingCommand();
         return true;
     }
@@ -972,15 +1463,12 @@ bool VimInputHandler::handleVisualKey(QKeyEvent* event)
     if(key == ":") { promptCommand(); return true; }
     if(m_mode == Mode::VisualBlock && (key == "d" || key == "x" || key == "y" || key == "c" || key == "I" || key == "A"))
     { finishBlockOperator(key == "x" ? "d" : key); return true; }
-    if((key == "p" || key == "P") && m_mode != Mode::VisualBlock)
+    if(key == "p" || key == "P")
     {
-        if(!m_editor->isReadOnly())
-        {
-            const int first = int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETSELECTIONSTART));
-            const QString value = QApplication::clipboard()->text();
-            m_editor->replaceSelectedText(value); setPosition(first);
-        }
-        setMode(Mode::Normal); return true;
+        if(m_mode == Mode::VisualBlock)
+        { m_selectedRegister.clear(); resetPendingCommand(); return true; }
+        pasteVisual(key == "P", takeCount());
+        return true;
     }
     if(key == "o") { std::swap(m_visualAnchor, m_visualCaret); updateVisualSelection(); return true; }
     if(key == "J")
@@ -1062,6 +1550,18 @@ bool VimInputHandler::handleVisualKey(QKeyEvent* event)
         return true;
     }
 
+    if(key == "g" || (key.size() == 1 && QString("fFtT").contains(key)))
+    {
+        m_pendingCommand = key;
+        m_pendingCount = takeCount();
+        return true;
+    }
+    if(key == ";")
+    {
+        repeatFindMotion(false, takeCount());
+        return true;
+    }
+
     const int count = takeCount();
     setPosition(m_visualCaret);
     if(move(key, count))
@@ -1077,6 +1577,7 @@ bool VimInputHandler::handleVisualKey(QKeyEvent* event)
 void VimInputHandler::setMode(Mode mode)
 {
     resetInsertCompletion();
+    if(mode == Mode::Normal || mode == Mode::Insert) m_visualTagSelected = false;
     if(m_mode == Mode::Insert && mode == Mode::Normal)
     {
         finishBlockInsert(); m_replace = false; m_editor->setOverwriteMode(false);
@@ -1245,6 +1746,24 @@ void VimInputHandler::clampNormalCaret()
 
 bool VimInputHandler::move(const QString& command, int count)
 {
+    if(command == "gg" || command == "g_")
+    {
+        int lastLine = m_editor->lines() - 1;
+        if(lastLine > 0 && positionFromLine(lastLine) == documentLength()) --lastLine;
+        const int line = command == "gg" ? std::min(lastLine, std::max(1, count) - 1) :
+            std::min(lastLine, currentLine() + std::min(std::max(1, count) - 1, lastLine));
+        setPosition(positionFromLine(line));
+        if(command == "gg") move("^", 1);
+        else
+        {
+            int end = lineEndPosition(line);
+            while(end > positionFromLine(line) && characterClassAt(positionBefore(end)) == 0)
+                end = positionBefore(end);
+            setPosition(end > positionFromLine(line) ? positionBefore(end) : end);
+        }
+        m_editor->SendScintilla(QsciScintillaBase::SCI_CHOOSECARETX);
+        return true;
+    }
     if(command == "+" || command == "-" || command == "\r" || command == "_")
     {
         const int offset = command == "-" ? -count : command == "_" ? count - 1 : count;
@@ -1263,7 +1782,7 @@ bool VimInputHandler::move(const QString& command, int count)
             const int c = characterClassAt(p);
             return command == "gE" && c ? 1 : c;
         };
-        for(int i = 0; i < count; ++i)
+        for(int i = 0; i < count && position > 0; ++i)
         {
             const int c = category(position);
             while(position > 0 && category(positionBefore(position)) == c)
@@ -1272,6 +1791,7 @@ bool VimInputHandler::move(const QString& command, int count)
             while(position > 0 && category(position) == 0) position = positionBefore(position);
         }
         setPosition(position);
+        m_editor->SendScintilla(QsciScintillaBase::SCI_CHOOSECARETX);
         return true;
     }
     if(command == "(" || command == ")")
@@ -1415,6 +1935,10 @@ bool VimInputHandler::move(const QString& command, int count)
         return false;
     }
 
+    // Horizontal motions set the column used by a subsequent j/k. Vertical
+    // motions retain it so long-short-long line traversal returns to that column.
+    if(command != "j" && command != "k")
+        m_editor->SendScintilla(QsciScintillaBase::SCI_CHOOSECARETX);
     return true;
 }
 
@@ -1532,6 +2056,14 @@ bool VimInputHandler::textObjectRange(const QString& object, bool around, int co
     const int caret = currentPosition();
     first = caret;
     last = caret;
+    if(object == "t")
+    {
+        const bool expanding = m_pendingCommand.startsWith("v") &&
+                               (m_visualAnchor != m_visualCaret || m_visualTagSelected);
+        return tagObjectRange(m_editor->text().toUtf8(), caret, around, std::max(1, count), expanding,
+                              std::min(m_visualAnchor, m_visualCaret),
+                              positionAfter(std::max(m_visualAnchor, m_visualCaret)), first, last);
+    }
     if(object == "p" || object == "s")
     {
         // Byte ranges match Scintilla's positions. ASCII delimiters cannot split
@@ -1798,6 +2330,7 @@ bool VimInputHandler::applyTextObject(const QString& object, bool around, int co
             m_visualAnchor = first;
             m_visualCaret = positionBefore(last);
         }
+        m_visualTagSelected = object == "t";
         m_mode = object == "p" ? Mode::VisualLine : Mode::Visual;
         updateVisualSelection();
         emit modeChanged();
@@ -1843,6 +2376,15 @@ bool VimInputHandler::applyOperatorMotion(const QString& command, int count)
 {
     const int start = currentPosition();
     const int startLine = currentLine();
+
+    if(command == "gg")
+    {
+        move(command, count);
+        const int targetLine = currentLine();
+        setPosition(start);
+        applyLineOperator(std::min(startLine, targetLine), std::max(startLine, targetLine));
+        return true;
+    }
 
     if(command == "+" || command == "-" || command == "\r" || command == "_")
     {
@@ -1898,7 +2440,9 @@ bool VimInputHandler::applyOperatorMotion(const QString& command, int count)
         target = positionAfter(target);
     int first = std::min(start, target);
     int last = std::max(start, target);
-    if((command == "%" || command == "ge" || command == "gE") && last < documentLength())
+    if((command == "%" || command == "ge" || command == "gE" || command == "g_") &&
+       last < documentLength() &&
+       (command != "g_" || last < lineEndPosition(int(m_editor->SendScintilla(QsciScintillaBase::SCI_LINEFROMPOSITION, last)))))
         last = positionAfter(last);
     applyCharacterOperator(first, last);
     return true;
@@ -2259,9 +2803,75 @@ void VimInputHandler::paste(bool before, int count)
     clampNormalCaret();
 }
 
+void VimInputHandler::pasteVisual(bool preserveRegisters, int count)
+{
+    const QString selected = m_selectedRegister;
+    m_selectedRegister.clear();
+    resetPendingCommand();
+    if(m_editor->isReadOnly())
+    {
+        setPosition(m_visualCaret);
+        setMode(Mode::Normal);
+        clampNormalCaret();
+        return;
+    }
+
+    bool linewise = false, blockwise = false;
+    // Read before recording the replaced selection: it may overwrite the source
+    // unnamed, numbered, small-delete, or clipboard register.
+    QString value = registerText(selected, linewise, blockwise);
+    // Preserve the selection until column-aware block replacement is available.
+    if(blockwise) return;
+
+    const bool wholeLines = m_mode == Mode::VisualLine;
+    const int first = int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETSELECTIONSTART));
+    const int last = int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETSELECTIONEND));
+    const QString document = m_editor->text();
+    QString replaced = m_editor->selectedText();
+    if(wholeLines && !replaced.endsWith('\n') && !replaced.endsWith('\r'))
+        replaced += endOfLine();
+
+    // Visual p writes deletion history, whereas modern Vim's P leaves all
+    // registers untouched. The selected register is the source, never a target.
+    if(!preserveRegisters) setRegister(replaced, wholeLines);
+
+    value.replace("\r\n", "\n");
+    value.replace('\r', '\n');
+    value.replace("\n", endOfLine());
+    if(wholeLines && !linewise) value += endOfLine();
+    value = value.repeated(std::max(1, count));
+    int insertedFirst = first;
+    if(wholeLines)
+    {
+        // Keep an unterminated final line unterminated, as normal linewise paste
+        // does. Promote a character register before applying the repeat count.
+        if(last == documentLength() && !document.endsWith('\n') && !document.endsWith('\r') &&
+           value.endsWith(endOfLine())) value.chop(endOfLine().size());
+    }
+    else if(linewise && !value.isEmpty())
+    {
+        value.prepend(endOfLine());
+        insertedFirst += endOfLine().toUtf8().size();
+    }
+
+    // An empty source (including "_) replaces a character selection with nothing;
+    // in Visual Line mode it supplies an empty line, matching Vim.
+    m_editor->replaceSelectedText(value);
+    const int insertedLast = first + value.toUtf8().size();
+    m_visualAnchor = insertedFirst;
+    m_visualCaret = insertedLast > insertedFirst ? positionBefore(insertedLast) : insertedFirst;
+    setMode(Mode::Normal);
+    const bool multiline = value.contains('\n') || value.contains('\r');
+    setPosition(wholeLines || linewise || multiline || value.isEmpty()
+        ? insertedFirst : positionBefore(insertedLast));
+    if(wholeLines || linewise) move("^", 1);
+    clampNormalCaret();
+}
+
 void VimInputHandler::enterVisualMode(bool linewise)
 {
     resetPendingCommand();
+    m_visualTagSelected = false;
     m_visualAnchor = currentPosition();
     m_visualCaret = m_visualAnchor;
     setMode(linewise ? Mode::VisualLine : Mode::Visual);
@@ -2386,7 +2996,11 @@ bool VimInputHandler::processStroke(QKeyEvent* event)
 {
     const QString key = commandKey(event);
     if(m_mode == Mode::Normal && m_pendingCommand.isEmpty() && key == "q" && !m_recording.isEmpty())
-    { m_recording.clear(); return true; }
+    {
+        m_recording.clear();
+        if(!m_insertPauses.isEmpty()) finishTemporaryNormal(key);
+        return true;
+    }
     if(!m_recording.isEmpty() && m_replayDepth == 0)
         m_macros[m_recording].append({event->key(), event->modifiers(), event->text()});
     if(m_sequence.isEmpty()) m_changeBefore = m_editor->text();
@@ -2414,28 +3028,32 @@ bool VimInputHandler::processStroke(QKeyEvent* event)
         QCoreApplication::sendEvent(m_editor, event);
         m_forwarding = false;
     }
-    if(m_mode == Mode::Normal && m_pendingCommand.isEmpty() && m_mappingPrefix.isEmpty() && m_count == 0 && m_selectedRegister.isEmpty())
-    {
-        if(m_groupOpen) { m_editor->endUndoAction(); m_groupOpen = false; }
-        if(!history && m_replayDepth == 0 && m_editor->text() != m_changeBefore)
-        {
-            if(key != ".") m_lastChange = m_sequence;
-            const QByteArray before = m_changeBefore.toUtf8(), after = m_editor->text().toUtf8();
-            int changed = 0;
-            while(changed < before.size() && changed < after.size() && before.at(changed) == after.at(changed))
-                ++changed;
-            // A common UTF-8 byte prefix can end inside the changed character.
-            while(changed > 0 && changed < after.size() &&
-                  (static_cast<unsigned char>(after.at(changed)) & 0xc0) == 0x80)
-                --changed;
-            if(m_changes.isEmpty() || m_changes.last() != changed) m_changes.append(changed);
-            if(m_changes.size() > 100) m_changes.removeFirst();
-            m_changeIndex = m_changes.size();
-        }
-        m_sequence.clear();
-        if(key != "\"") m_selectedRegister.clear();
-    }
+    if(m_insertPauses.isEmpty() && m_mode == Mode::Normal && m_pendingCommand.isEmpty() &&
+       m_mappingPrefix.isEmpty() && m_count == 0 && m_selectedRegister.isEmpty())
+        finishChangeSequence(key, history);
     return true;
+}
+
+void VimInputHandler::finishChangeSequence(const QString& key, bool history)
+{
+    if(m_groupOpen) { m_editor->endUndoAction(); m_groupOpen = false; }
+    if(!history && m_replayDepth == 0 && m_editor->text() != m_changeBefore)
+    {
+        if(key != ".") m_lastChange = m_sequence;
+        const QByteArray before = m_changeBefore.toUtf8(), after = m_editor->text().toUtf8();
+        int changed = 0;
+        while(changed < before.size() && changed < after.size() && before.at(changed) == after.at(changed))
+            ++changed;
+        // A common UTF-8 byte prefix can end inside the changed character.
+        while(changed > 0 && changed < after.size() &&
+              (static_cast<unsigned char>(after.at(changed)) & 0xc0) == 0x80)
+            --changed;
+        if(m_changes.isEmpty() || m_changes.last() != changed) m_changes.append(changed);
+        if(m_changes.size() > 100) m_changes.removeFirst();
+        m_changeIndex = m_changes.size();
+    }
+    m_sequence.clear();
+    if(key != "\"") m_selectedRegister.clear();
 }
 
 void VimInputHandler::replay(const Strokes& input, int count)
@@ -2479,12 +3097,7 @@ bool VimInputHandler::extendedNormal(const QString& key)
     { m_pendingCommand = key; m_pendingCount = takeCount(); return true; }
     if(key == ";" || key == ",")
     {
-        QString command = m_findCommand;
-        if(key == "," && !command.isEmpty()) command = command == command.toUpper() ? command.toLower() : command.toUpper();
-        int original = currentPosition();
-        if(command.toLower() == "t")
-            setPosition(command == command.toLower() ? positionAfter(original) : positionBefore(original));
-        if(!findCharacter(command, m_findTarget, takeCount())) setPosition(original);
+        repeatFindMotion(key == ",", takeCount());
         return true;
     }
     if(key == "X")
@@ -2513,6 +3126,7 @@ bool VimInputHandler::extendedNormal(const QString& key)
 bool VimInputHandler::extendedPending(const QString& key)
 {
     const QString pending = m_pendingCommand;
+    if(handleGMotion(key)) return true;
     if(pending == "q")
     {
         resetPendingCommand();
@@ -2547,15 +3161,10 @@ bool VimInputHandler::extendedPending(const QString& key)
     if(!pending.isEmpty() && QString("fFtT").contains(pending.right(1)))
     {
         const QString command = pending.right(1);
-        int start = currentPosition();
-        bool found = findCharacter(command, key, m_pendingCount * takeCount());
+        const QString operation = pending.left(pending.size()-1);
+        applyFindMotion(command, key, m_pendingCount * takeCount(), false, operation);
         m_findCommand = command; m_findTarget = key;
-        if(found && pending.size() > 1)
-        {
-            int target = currentPosition(); m_pendingCommand = pending.left(pending.size()-1);
-            if(target >= start) applyCharacterOperator(start, positionAfter(target));
-            else applyCharacterOperator(target, start);
-        }
+        if(!operation.isEmpty()) m_selectedRegister.clear();
         resetPendingCommand(); return true;
     }
     if(pending == "g" && (key == ";" || key == ","))
@@ -2572,23 +3181,6 @@ bool VimInputHandler::extendedPending(const QString& key)
     }
     if(pending == "g" && (key == "u" || key == "U" || key == "~"))
     { m_pendingCommand += key; return true; }
-    if(pending.endsWith("g") && (key == "e" || key == "E"))
-    {
-        const int count = m_pendingCount * takeCount();
-        if(pending == "g") move("g" + key, count);
-        else
-        {
-            m_pendingCommand.chop(1);
-            applyOperatorMotion("g" + key, count);
-        }
-        resetPendingCommand(); return true;
-    }
-    if(pending == "g" && key == "_")
-    {
-        int p = lineEndPosition(currentLine());
-        while(p > positionFromLine(currentLine()) && characterClassAt(positionBefore(p)) == 0) p = positionBefore(p);
-        setPosition(p > positionFromLine(currentLine()) ? positionBefore(p) : p); resetPendingCommand(); return true;
-    }
     if(pending == "g" && key == "J") { int count = m_pendingCount; resetPendingCommand(); joinLines(count, true); return true; }
     if(pending == "g" && key == "v")
     {
@@ -2596,9 +3188,84 @@ bool VimInputHandler::extendedPending(const QString& key)
         m_visualAnchor = std::min(m_savedAnchor, documentLength()); m_visualCaret = std::min(m_savedCaret, documentLength());
         updateVisualSelection(); return true;
     }
-    if((pending == "gu" || pending == "gU" || pending == "g~") && (key == pending.right(1) || key == "g"))
-    { applyLineOperator(currentLine(), currentLine()+m_pendingCount-1); resetPendingCommand(); return true; }
+    if((pending == "gu" || pending == "gU" || pending == "g~") && key == pending.right(1))
+    { applyLineOperator(currentLine(), currentLine()+m_pendingCount*takeCount()-1); resetPendingCommand(); return true; }
+    if((pending == "gug" || pending == "gUg" || pending == "g~g") && key == pending.mid(1, 1))
+    {
+        m_pendingCommand.chop(1);
+        applyLineOperator(currentLine(), currentLine()+m_pendingCount*takeCount()-1);
+        resetPendingCommand();
+        return true;
+    }
     return false;
+}
+
+bool VimInputHandler::handleGMotion(const QString& key)
+{
+    if(!m_pendingCommand.endsWith("g") || (key != "g" && key != "_" && key != "e" && key != "E"))
+        return false;
+    const QString operation = m_pendingCommand.left(m_pendingCommand.size()-1);
+    if(!operation.isEmpty() && !isMotionOperator(operation)) return false;
+    const int count = m_pendingCount * takeCount();
+    const bool visual = m_mode == Mode::Visual || m_mode == Mode::VisualLine || m_mode == Mode::VisualBlock;
+    if(visual) setPosition(m_visualCaret);
+    if(operation.isEmpty())
+        move("g" + key, count);
+    else
+    {
+        m_pendingCommand = operation;
+        applyOperatorMotion("g" + key, count);
+        m_selectedRegister.clear();
+    }
+    if(visual)
+    {
+        m_visualCaret = currentPosition();
+        updateVisualSelection();
+    }
+    resetPendingCommand();
+    return true;
+}
+
+bool VimInputHandler::repeatFindMotion(bool reverse, int count, const QString& operation)
+{
+    QString command = m_findCommand;
+    if(reverse && !command.isEmpty())
+        command = command == command.toUpper() ? command.toLower() : command.toUpper();
+    return applyFindMotion(command, m_findTarget, count, true, operation);
+}
+
+bool VimInputHandler::applyFindMotion(const QString& command, const QString& target, int count,
+                                     bool repeat, const QString& operation)
+{
+    const bool visual = m_mode == Mode::Visual || m_mode == Mode::VisualLine || m_mode == Mode::VisualBlock;
+    const int start = visual ? m_visualCaret : currentPosition();
+    if(visual) setPosition(start);
+    bool withinLine = true;
+    if(repeat && command.toLower() == "t")
+    {
+        // Repeating t/T must skip the adjacent previously found character, without
+        // crossing an EOL or walking into a different line when no match remains.
+        const int next = command == "t" ? positionAfter(start) : positionBefore(start);
+        withinLine = next != start && next >= positionFromLine(currentLine()) && next < lineEndPosition(currentLine());
+        if(withinLine) setPosition(next);
+    }
+    const bool found = withinLine && findCharacter(command, target, count);
+    if(!found) setPosition(start);
+    if(visual)
+    {
+        m_visualCaret = currentPosition();
+        updateVisualSelection();
+    }
+    else if(found && !operation.isEmpty())
+    {
+        const int finish = currentPosition();
+        m_pendingCommand = operation;
+        // Forward f/t are inclusive; backward F/T exclude the original cursor.
+        // T may legitimately end where it started, which is an empty operator range.
+        if(command == command.toLower()) applyCharacterOperator(start, positionAfter(finish));
+        else applyCharacterOperator(finish, start);
+    }
+    return found;
 }
 
 bool VimInputHandler::findCharacter(const QString& command, const QString& target, int count)
@@ -2619,7 +3286,9 @@ bool VimInputHandler::findCharacter(const QString& command, const QString& targe
         if(!found) return false;
     }
     if(command.toLower() == "t") position = forward ? positionBefore(position) : positionAfter(position);
-    setPosition(position); return true;
+    setPosition(position);
+    m_editor->SendScintilla(QsciScintillaBase::SCI_CHOOSECARETX);
+    return true;
 }
 
 void VimInputHandler::transformRange(int first, int last, const QString& operation)
@@ -2691,16 +3360,27 @@ void VimInputHandler::promptCommand()
     if(!m_commandLine)
     {
         m_commandLine = new QLineEdit(m_editor);
+        m_commandLine->installEventFilter(this);
         m_commandLine->setPlaceholderText(QString::fromUtf8("輸入指令，例如 %s/foo/bar/g；Esc 取消"));
         connect(m_commandLine, &QLineEdit::returnPressed, this, [this]() {
             const QString command = m_commandLine->text();
-            if(executeCommand(command)) { m_commandLine->hide(); m_editor->setFocus(); }
+            if(executeCommand(command))
+            {
+                m_commandLine->hide();
+                if(!m_substituteActive)
+                {
+                    m_editor->setFocus();
+                    finishTemporaryNormal(":");
+                }
+            }
             else m_commandLine->setToolTip(QString::fromUtf8("指令不支援、格式錯誤或找不到符合項目"));
         });
         auto* cancel = new QAction(m_commandLine);
         cancel->setShortcut(QKeySequence(Qt::Key_Escape)); cancel->setShortcutContext(Qt::WidgetWithChildrenShortcut);
         m_commandLine->addAction(cancel);
-        connect(cancel, &QAction::triggered, this, [this]() { m_commandLine->hide(); m_editor->setFocus(); });
+        connect(cancel, &QAction::triggered, this, [this]() {
+            m_commandLine->hide(); m_editor->setFocus(); finishTemporaryNormal(":");
+        });
     }
     m_commandLine->setGeometry(4, m_editor->height()-32, std::max(60, m_editor->width()-8), 28);
     m_commandLine->setText(visualRange ? "'<,'>" : QString());
@@ -2709,6 +3389,7 @@ void VimInputHandler::promptCommand()
 
 bool VimInputHandler::executeCommand(const QString& input)
 {
+    if(m_substituteActive) return false;
     QString command = input.trimmed();
     if(command.startsWith(':')) command = command.mid(1).trimmed();
     if(command == "w" || command == "write")
@@ -2878,10 +3559,48 @@ bool VimInputHandler::executeCommand(const QString& input)
         else part += command.at(i);
     }
     parts << part; if(parts.size() < 2 || parts.size() > 3) return false;
-    QString flags = parts.size() == 3 ? parts.at(2) : QString();
-    if(flags.contains(QRegularExpression("[^gi]"))) return false;
+    const auto options = QRegularExpression("^([gic]*)(?:\\s+([0-9]+))?$")
+        .match(parts.size() == 3 ? parts.at(2) : QString());
+    if(!options.hasMatch()) return false;
+    const QString flags = options.captured(1);
+    if(!options.captured(2).isEmpty())
+    {
+        bool valid = false;
+        const qint64 count = options.captured(2).toLongLong(&valid);
+        if(!valid || count < 1 || count > std::numeric_limits<int>::max()) return false;
+        firstLine = lastLine;
+        lastLine = int(std::min(qint64(lineCount-1), qint64(firstLine)+count-1));
+    }
     QRegularExpression expression(parts.at(0), flags.contains('i') ? QRegularExpression::CaseInsensitiveOption : QRegularExpression::NoPatternOption);
     if(!expression.isValid() || m_editor->isReadOnly()) return false;
+    const auto replacementFor = [&parts](const QRegularExpressionMatch& match) {
+        QString replacement = parts.at(1);
+        for(int group = std::min(9, match.lastCapturedIndex()); group >= 1; --group)
+            replacement.replace("\\" + QString::number(group), match.captured(group));
+        replacement.replace("&", match.captured());
+        return replacement;
+    };
+    if(flags.contains('c'))
+    {
+        if(!m_enabled || m_mode == Mode::Insert) return false;
+        const QByteArray bytes = m_editor->text().toUtf8();
+        QVector<SubstituteMatch> matches;
+        for(int line = firstLine; line <= lastLine; ++line)
+        {
+            const int first = positionFromLine(line), last = lineEndPosition(line);
+            const QString value = QString::fromUtf8(bytes.mid(first, last-first));
+            auto found = expression.globalMatch(value);
+            while(found.hasNext())
+            {
+                const auto match = found.next();
+                const int start = first + value.left(match.capturedStart()).toUtf8().size();
+                const int end = start + match.captured().toUtf8().size();
+                matches.append({start, end, replacementFor(match)});
+                if(!flags.contains('g')) break;
+            }
+        }
+        return beginSubstituteConfirmation(matches);
+    }
     bool changed = false; m_editor->beginUndoAction();
     for(int n = lastLine; n >= firstLine; --n)
     {
@@ -2891,14 +3610,126 @@ bool VimInputHandler::executeCommand(const QString& input)
         while(matches.hasNext()) { found << matches.next(); if(!flags.contains('g')) break; }
         for(int i = found.size()-1; i >= 0; --i)
         {
-            const auto match = found.at(i); QString replacement = parts.at(1);
-            for(int group = std::min(9, match.lastCapturedIndex()); group >= 1; --group) replacement.replace("\\" + QString::number(group), match.captured(group));
-            replacement.replace("&", match.captured());
-            value.replace(match.capturedStart(), match.capturedLength(), replacement); changed = true;
+            const auto match = found.at(i);
+            value.replace(match.capturedStart(), match.capturedLength(), replacementFor(match)); changed = true;
         }
         if(!found.isEmpty()) { setSelection(first, last); m_editor->replaceSelectedText(value); }
     }
     m_editor->endUndoAction(); setPosition(positionFromLine(firstLine)); clampNormalCaret(); return changed;
+}
+
+bool VimInputHandler::beginSubstituteConfirmation(const QVector<SubstituteMatch>& matches)
+{
+    if(matches.isEmpty()) return false;
+    if(m_groupOpen) { m_editor->endUndoAction(); m_groupOpen = false; }
+    m_sequence.clear(); resetPendingCommand();
+    setMode(Mode::Normal);
+    m_substituteMatches = matches;
+    m_substituteExpected = m_editor->text().toUtf8();
+    m_substituteIndex = 0; m_substituteOffset = 0;
+    m_substituteActive = true;
+    if(!m_substitutePrompt)
+    {
+        m_substitutePrompt = new QLineEdit(m_editor);
+        m_substitutePrompt->setObjectName("vimSubstituteConfirmation");
+        m_substitutePrompt->setReadOnly(true);
+        m_substitutePrompt->installEventFilter(this);
+    }
+    m_substitutePrompt->setGeometry(4, m_editor->height()-32, std::max(60, m_editor->width()-8), 28);
+    showSubstituteMatch();
+    return true;
+}
+
+void VimInputHandler::showSubstituteMatch()
+{
+    if(!m_substituteActive) return;
+    if(m_substituteIndex >= m_substituteMatches.size()) { finishSubstituteConfirmation(); return; }
+    const auto match = m_substituteMatches.at(m_substituteIndex);
+    setSelection(match.first + m_substituteOffset, match.last + m_substituteOffset);
+    if(!m_substituteActive) return;
+    m_editor->SendScintilla(QsciScintillaBase::SCI_SCROLLCARET);
+    QString replacement = match.replacement;
+    replacement.replace('\r', "\\r"); replacement.replace('\n', "\\n");
+    if(replacement.size() > 60) replacement = replacement.left(57) + "...";
+    const QString prompt = tr("%1/%2  y:yes n:no a:all q:quit l:last Esc:cancel  -> %3")
+        .arg(m_substituteIndex + 1).arg(m_substituteMatches.size()).arg(replacement);
+    m_substitutePrompt->setText(prompt);
+    m_substitutePrompt->setToolTip(prompt);
+    m_substitutePrompt->setCursorPosition(0);
+    m_substitutePrompt->show(); m_substitutePrompt->raise(); m_substitutePrompt->setFocus();
+}
+
+bool VimInputHandler::acceptSubstituteMatch()
+{
+    if(!m_substituteActive || m_substituteIndex >= m_substituteMatches.size()) return false;
+    if(m_editor->isReadOnly() || m_editor->text().toUtf8() != m_substituteExpected)
+    { finishSubstituteConfirmation(); return false; }
+    const auto match = m_substituteMatches.at(m_substituteIndex);
+    const int first = match.first + m_substituteOffset, last = match.last + m_substituteOffset;
+    const QByteArray replacement = match.replacement.toUtf8();
+    if(m_substituteExpected.mid(first, last-first) != replacement)
+    {
+        if(!m_substituteUndoOpen) { m_editor->beginUndoAction(); m_substituteUndoOpen = true; }
+        m_substituteChanging = true;
+        setSelection(first, last); m_editor->replaceSelectedText(match.replacement);
+        m_substituteChanging = false;
+        if(!m_substituteActive) return false;
+        m_substituteExpected.replace(first, last-first, replacement);
+        if(m_editor->text().toUtf8() != m_substituteExpected)
+        { finishSubstituteConfirmation(); return false; }
+    }
+    m_substituteOffset += replacement.size() - (last-first);
+    ++m_substituteIndex;
+    return true;
+}
+
+bool VimInputHandler::handleSubstituteConfirmation(QKeyEvent* event)
+{
+    if(!m_enabled || m_editor->isReadOnly() || m_editor->text().toUtf8() != m_substituteExpected)
+    { finishSubstituteConfirmation(); return true; }
+    const bool escape = event->key() == Qt::Key_Escape ||
+        (event->key() == Qt::Key_BracketLeft && event->modifiers() == Qt::ControlModifier);
+    if(escape) { finishSubstituteConfirmation(); return true; }
+    if(event->modifiers().testFlag(Qt::ControlModifier) || event->modifiers().testFlag(Qt::AltModifier) ||
+       event->modifiers().testFlag(Qt::MetaModifier)) return true;
+    const QString key = commandKey(event);
+    if(key == "q") { finishSubstituteConfirmation(); return true; }
+    if(key == "n") ++m_substituteIndex;
+    else if(key == "a")
+    {
+        while(m_substituteActive && m_substituteIndex < m_substituteMatches.size())
+            if(!acceptSubstituteMatch()) break;
+    }
+    else if(key == "y" || key == "l")
+    {
+        if(!acceptSubstituteMatch()) return true;
+        if(key == "l") { finishSubstituteConfirmation(); return true; }
+    }
+    else return true;
+    showSubstituteMatch();
+    return true;
+}
+
+void VimInputHandler::finishSubstituteConfirmation(bool restoreFocus)
+{
+    if(!m_substituteActive) return;
+    m_substituteActive = false;
+    if(m_substituteUndoOpen) { m_editor->endUndoAction(); m_substituteUndoOpen = false; }
+    m_substituteMatches.clear(); m_substituteExpected.clear();
+    m_substituteIndex = 0; m_substituteOffset = 0;
+    if(m_substitutePrompt) m_substitutePrompt->hide();
+    if(restoreFocus)
+    {
+        setPosition(int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETSELECTIONSTART)));
+        clampNormalCaret(); m_editor->setFocus();
+        finishTemporaryNormal(":");
+    }
+    else
+    {
+        // External edits, input methods, and mouse actions invalidate the saved
+        // CTRL-O insertion context. Stay Normal without moving the host caret.
+        m_insertPauses.clear();
+    }
 }
 
 void VimInputHandler::finishBlockOperator(const QString& command)

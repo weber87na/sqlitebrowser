@@ -8,6 +8,21 @@ class TestVimInputHandler : public QObject
     Q_OBJECT
 
 private slots:
+    void nativeFolding();
+    void insertIndentation();
+    void visualRegisterPaste_data();
+    void visualRegisterPaste();
+    void visualPasteHistory_data();
+    void visualPasteHistory();
+    void visualPasteReadOnly();
+    void visualPasteRepeatUndo();
+    void visualPasteDefersBlockRegisters();
+    void gMotionNavigation();
+    void gAndFindOperators_data();
+    void gAndFindOperators();
+    void visualFindMotions();
+    void findRepeatFailureAndMappings();
+    void horizontalPreferredColumn();
     void changeHistory();
     void registerHistories_data();
     void registerHistories();
@@ -37,6 +52,11 @@ private slots:
     void builtinCommands();
     void repeatAndMacro();
     void substitution();
+    void substitutionConfirmation_data();
+    void substitutionConfirmation();
+    void substitutionConfirmationUnicodeAndZeroLength();
+    void substitutionConfirmationLifecycle();
+    void substitutionConfirmationCommandUi();
     void exLineCommands_data();
     void exLineCommands();
     void exRangesAndMarks();
@@ -47,11 +67,23 @@ private slots:
     void paragraphAndSentenceObjects_data();
     void paragraphAndSentenceObjects();
     void paragraphAndSentenceSelections();
+    void tagObjects_data();
+    void tagObjects();
+    void tagObjectSelectionsAndRegisters();
     void textObjects_data();
     void textObjects();
     void enhancedMotions();
     void mappingPrefixAndEscape();
     void insertAndEscape();
+    void insertOneNormalCommand_data();
+    void insertOneNormalCommand();
+    void insertOneNormalPending();
+    void insertOneNormalRepeatAndMacros();
+    void insertOneNormalUndoAndReadOnly();
+    void insertOneNormalEx();
+    void insertOneNormalSubstitutionConfirmation_data();
+    void insertOneNormalSubstitutionConfirmation();
+    void insertOneNormalSubstitutionExternalCancellation();
     void insertCtrlWDeletesPreviousWord();
     void normalMotionsAndDelete();
     void wordEndMotionIncludesPunctuationAcrossLines();

@@ -228,6 +228,62 @@ jobs:
             DB.Browser.for.SQLite-*.zip
           retention-days: 1
 
+      - name: Create unsigned portable ZIP for repository PR
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          $portableDir = Join-Path $PWD "pr-portable"
+          New-Item -ItemType Directory -Path $portableDir, "$portableDir\extensions", "$portableDir\licenses" | Out-Null
+          Copy-Item "release-sqlite\Release\DB Browser for SQLite.exe", "release-sqlcipher\Release\DB Browser for SQLCipher.exe" $portableDir
+          Copy-Item "C:\dev\SQLite\sqlite3.dll", "C:\dev\SQLCipher\sqlcipher.dll" $portableDir
+          $sslSuffix = if ("${{ matrix.arch }}" -eq "x64") { "-x64" } else { "" }
+          Copy-Item "C:\dev\OpenSSL\libcrypto-1_1$sslSuffix.dll", "C:\dev\OpenSSL\libssl-1_1$sslSuffix.dll" $portableDir
+          Copy-Item "C:\dev\SQLite\formats.dll", "sqlean\sqlean.dll" "$portableDir\extensions"
+          Copy-Item LICENSE* "$portableDir\licenses"
+          Copy-Item "doc\vim-builtin.md" "$portableDir\VIM-README.md"
+
+          # Deploy Qt plugins and translations directly; PR builds do not create an MSI.
+          & "$env:QT_ROOT_DIR\bin\windeployqt.exe" --release --no-compiler-runtime --dir $portableDir $portableDir
+          if ($LASTEXITCODE -ne 0) { throw "windeployqt failed: $LASTEXITCODE" }
+          # Use app-local CRT DLLs so extracting the ZIP is sufficient to run it.
+          $crtDir = Join-Path $env:VCToolsRedistDir "${{ matrix.arch }}\Microsoft.VC142.CRT"
+          Copy-Item "$crtDir\*.dll" $portableDir
+
+          # Verify both packaged programs without development DLLs on PATH.
+          # --version displays a modal Windows message box; --quit exits after initialization.
+          $buildPath = $env:PATH
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          $env:QT_PLUGIN_PATH = $null
+          $env:QT_QPA_PLATFORM_PLUGIN_PATH = $null
+          try {
+            foreach ($exe in @("DB Browser for SQLite.exe", "DB Browser for SQLCipher.exe")) {
+              $process = Start-Process -FilePath "$portableDir\$exe" -ArgumentList "--quit" -WorkingDirectory $portableDir -PassThru
+              if (-not $process.WaitForExit(30000)) {
+                $process.Kill()
+                throw "$exe did not exit after --quit"
+              }
+              if ($process.ExitCode -ne 0) { throw "$exe failed: $($process.ExitCode)" }
+            }
+          } finally {
+            $env:PATH = $buildPath
+          }
+
+          $buildCommit = git rev-parse --short HEAD
+          $zipName = "DB.Browser.for.SQLite-pr-${{ github.event.pull_request.number }}-$buildCommit-win-${{ matrix.arch }}.zip"
+          Compress-Archive -Path "$portableDir\*" -DestinationPath $zipName
+          $digest = (Get-FileHash $zipName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$digest  $zipName" | Set-Content "$zipName.sha256" -Encoding ascii
+
+      - name: Upload unsigned repository PR ZIP
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/upload-artifact@v7
+        with:
+          name: vim-pr-${{ github.event.pull_request.number }}-win-${{ matrix.arch }}-unsigned
+          path: |
+            DB.Browser.for.SQLite-pr-*.zip
+            DB.Browser.for.SQLite-pr-*.zip.sha256
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Summary
         run: |
           $OPENSSL_VERSION=(C:\dev\OpenSSL\bin\openssl version) -replace "OpenSSL ([\d\.]+[a-z]+) .*", '$1'

@@ -42,6 +42,8 @@ public:
     void setEnabled(bool enabled);
     bool isEnabled() const;
     Mode mode() const;
+    // A true result means the command completed or a nonmodal substitution
+    // confirmation started; it does not imply that text was already changed.
     bool executeCommand(const QString& command);
     bool loadConfig(const QString& path);
 
@@ -53,6 +55,17 @@ protected:
 
 private:
     bool handleKeyPress(QKeyEvent* event);
+    bool handleKeyPressImpl(QKeyEvent* event);
+    void beginTemporaryNormal();
+    void finishTemporaryNormal(const QString& key = QString(), bool history = false,
+                               const QString& pending = QString());
+    void finishChangeSequence(const QString& key, bool history);
+    struct InsertPause {
+        int depth, line, position, column;
+        bool replace, atEnd;
+    };
+    QVector<InsertPause> m_insertPauses;
+    int m_keyDispatchDepth = 0;
     bool handleNormalKey(QKeyEvent* event);
     bool handleVisualKey(QKeyEvent* event);
     bool handlePendingKey(QKeyEvent* event);
@@ -65,6 +78,8 @@ private:
     void completeInsertWord(bool forward);
     void forwardInsertKey(QKeyEvent* event);
     void backspaceInsert(bool wholeLine);
+    void indentInsert(bool increase);
+    void foldCommand(const QString& command, int count);
 
     void setMode(Mode mode);
     void resetPendingCommand();
@@ -102,6 +117,7 @@ private:
     void setRegister(const QString& text, bool linewise, bool yank = false, bool blockwise = false);
     QString registerText(const QString& name, bool& linewise, bool& blockwise) const;
     void paste(bool before, int count);
+    void pasteVisual(bool preserveRegisters, int count);
 
     void enterVisualMode(bool linewise);
     void updateVisualSelection();
@@ -132,6 +148,17 @@ private:
     using Strokes = QVector<Stroke>;
     bool processStroke(QKeyEvent* event);
     void promptCommand();
+    struct SubstituteMatch { int first, last; QString replacement; };
+    bool beginSubstituteConfirmation(const QVector<SubstituteMatch>& matches);
+    bool handleSubstituteConfirmation(QKeyEvent* event);
+    bool acceptSubstituteMatch();
+    void showSubstituteMatch();
+    void finishSubstituteConfirmation(bool restoreFocus = true);
+    QVector<SubstituteMatch> m_substituteMatches;
+    QByteArray m_substituteExpected;
+    QLineEdit* m_substitutePrompt = nullptr;
+    int m_substituteIndex = 0, m_substituteOffset = 0;
+    bool m_substituteActive = false, m_substituteChanging = false, m_substituteUndoOpen = false;
     void playMapping(const QString& mapping);
     QMap<QString, QString> m_userMappings;
     QString m_leader = ",";
@@ -139,7 +166,11 @@ private:
     void replay(const Strokes& keys, int count);
     bool extendedNormal(const QString& key);
     bool extendedPending(const QString& key);
+    bool handleGMotion(const QString& key);
     bool findCharacter(const QString& command, const QString& target, int count);
+    bool applyFindMotion(const QString& command, const QString& target, int count, bool repeat,
+                         const QString& operation = QString());
+    bool repeatFindMotion(bool reverse, int count, const QString& operation = QString());
     void transformRange(int first, int last, const QString& operation);
     void indentLines(int first, int last, const QString& operation);
     bool m_forwarding = false;
@@ -181,6 +212,7 @@ private:
     int m_pendingCount;
     int m_visualAnchor;
     int m_visualCaret;
+    bool m_visualTagSelected = false;
     QString m_registerText;
     bool m_registerLinewise;
     QString m_lastSearch;
