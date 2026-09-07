@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QMap>
 #include <QVector>
 
@@ -60,6 +61,10 @@ private:
     bool executeCustomMapping(const QString& mapping);
     bool isCustomMappingPrefix(const QString& mapping) const;
     void flushInsertMappingPrefix();
+    void resetInsertCompletion();
+    void completeInsertWord(bool forward);
+    void forwardInsertKey(QKeyEvent* event);
+    void backspaceInsert(bool wholeLine);
 
     void setMode(Mode mode);
     void resetPendingCommand();
@@ -94,7 +99,8 @@ private:
 
     QString linesText(int firstLine, int lastLine) const;
     QString endOfLine() const;
-    void setRegister(const QString& text, bool linewise);
+    void setRegister(const QString& text, bool linewise, bool yank = false, bool blockwise = false);
+    QString registerText(const QString& name, bool& linewise, bool& blockwise) const;
     void paste(bool before, int count);
 
     void enterVisualMode(bool linewise);
@@ -105,6 +111,8 @@ private:
     int m_blockFirst = 0, m_blockLast = 0, m_blockColumn = 0, m_blockStart = 0;
     QString m_blockBefore;
     bool m_registerBlock = false;
+    QVector<int> m_changes;
+    int m_changeIndex = 0;
     QVector<int> m_jumps;
     int m_jumpIndex = -1;
     void finishVisualOperator(const QString& command);
@@ -112,7 +120,15 @@ private:
     void promptSearch(bool forward);
     void repeatSearch(bool reverse);
 
-    struct Stroke { int key; Qt::KeyboardModifiers modifiers; QString text; };
+    struct Stroke
+    {
+        int key;
+        Qt::KeyboardModifiers modifiers;
+        QString text;
+        // Dot repeat reuses accepted completion edits; recorded macros keep raw keys.
+        int completionDeleteBytes = -1;
+        QString completionText;
+    };
     using Strokes = QVector<Stroke>;
     bool processStroke(QKeyEvent* event);
     void promptCommand();
@@ -135,16 +151,27 @@ private:
     QMap<QString, Strokes> m_macros;
     QString m_recording, m_lastMacro;
     QMap<QString, QPair<QString, bool>> m_registers;
+    QMap<QString, bool> m_blockRegisters;
     QString m_selectedRegister;
+    bool m_insertRegisterPending = false;
     QMap<QString, int> m_marks;
     QByteArray m_trackedText;
     QString m_findCommand, m_findTarget;
     int m_savedAnchor = 0, m_savedCaret = 0;
     Mode m_savedVisualMode = Mode::Visual;
     bool m_replace = false;
+    struct ReplaceEdit { int start; QByteArray original, inserted; };
+    QVector<ReplaceEdit> m_replaceEdits;
+    int m_insertBackspaceStart = 0;
+    bool m_insertTextEntered = false;
     int m_insertRepeat = 1, m_insertStart = 0;
     QString m_insertBefore;
     bool m_repeatNewline = false;
+
+    QStringList m_completionCandidates;
+    int m_completionStart = 0, m_completionEnd = 0, m_completionIndex = 0;
+    bool m_completionChanging = false;
+    bool m_completionForward = true;
 
     QsciScintilla* m_editor;
     bool m_enabled;

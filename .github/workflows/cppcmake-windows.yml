@@ -11,6 +11,13 @@ on:
       - src/tests/TestNvimInputHandler.cpp
       - src/tests/TestVimInputHandler.*
       - src/tests/vim-standalone/**
+  pull_request:
+    branches: [vim-mode-windows]
+    paths:
+      - src/VimInputHandler.*
+      - src/tests/TestVimInputHandler.*
+      - src/tests/vim-standalone/**
+      - .github/workflows/cppcmake-windows.yml
   workflow_call:
     inputs:
       NIGHTLY:

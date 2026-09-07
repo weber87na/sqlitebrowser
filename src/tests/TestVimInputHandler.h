@@ -8,9 +8,26 @@ class TestVimInputHandler : public QObject
     Q_OBJECT
 
 private slots:
+    void changeHistory();
+    void registerHistories_data();
+    void registerHistories();
+    void numberedRegisterRotation();
+    void registerPasteShapes();
+    void blockRegisterHistory();
+    void insertRegisterClipboardAndCancel();
+    void insertRegisterCountRepeatUndo();
+    void readOnlyRegisterOperations();
     void lineStartMotions();
     void backwardEndOperators();
     void insertControlDeletion();
+    void insertCompletionCycles();
+    void insertCompletionUnicodeAndSafety();
+    void insertCompletionResets();
+    void insertCompletionDotRepeat();
+    void insertCompletionRepeatEdges();
+    void insertCompletionMacroIsDynamic();
+    void insertBackspaceAnchors();
+    void replaceBackspacing();
     void countedInsert();
     void numericAndSqlMappings();
     void blockEditing();
@@ -20,8 +37,16 @@ private slots:
     void builtinCommands();
     void repeatAndMacro();
     void substitution();
+    void exLineCommands_data();
+    void exLineCommands();
+    void exRangesAndMarks();
+    void exRejectsInvalidCommands();
+    void exVisualRange();
     void surround_data();
     void surround();
+    void paragraphAndSentenceObjects_data();
+    void paragraphAndSentenceObjects();
+    void paragraphAndSentenceSelections();
     void textObjects_data();
     void textObjects();
     void enhancedMotions();
