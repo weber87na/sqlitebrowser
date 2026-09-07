@@ -1477,7 +1477,7 @@ void TestVimInputHandler::insertOneNormalSubstitutionExternalCancellation()
     QVERIFY(prompt);
     QTest::keyClicks(prompt, "y");
     QCOMPARE(handler.mode(), VimInputHandler::Mode::Normal);
-    editor.SendScintilla(QsciScintillaBase::SCI_INSERTTEXT, 0UL, "!");
+    editor.SendScintilla(QsciScintillaBase::SCI_INSERTTEXT, static_cast<uintptr_t>(0), "!");
     QVERIFY(prompt->isHidden());
     QCOMPARE(editor.text(), QString("!bar foo"));
     // A stale CTRL-O pause used to resume Insert on this unrelated Normal key.
@@ -2358,7 +2358,7 @@ void TestVimInputHandler::substitutionConfirmationLifecycle()
     QVERIFY(!handler.executeCommand("%s/foo/bar/gc"));
     handler.setEnabled(true);
     QVERIFY(handler.executeCommand("%s/foo/bar/gc")); QTest::keyClicks(prompt, "y");
-    editor.SendScintilla(QsciScintillaBase::SCI_INSERTTEXT, 0UL, "!");
+    editor.SendScintilla(QsciScintillaBase::SCI_INSERTTEXT, static_cast<uintptr_t>(0), "!");
     QVERIFY(prompt->isHidden()); QCOMPARE(editor.text(), QString("!bar foo"));
     // External changes must not become part of the accepted replacements' undo unit.
     editor.undo(); QCOMPARE(editor.text(), QString("bar foo"));
