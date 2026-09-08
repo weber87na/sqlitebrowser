@@ -8,6 +8,15 @@ class TestVimInputHandler : public QObject
     Q_OBJECT
 
 private slots:
+    void searchFoldAndJumpRestoration();
+    void searchFocusCancellation();
+    void searchNavigation_data();
+    void searchNavigation();
+    void searchPreviewCancellation();
+    void searchHistoryAndInvalidPatterns();
+    void searchHighlightLifecycle();
+    void searchVisualAndTemporaryNormal();
+    void searchMacrosAndMappings();
     void nativeFolding();
     void insertIndentation();
     void visualRegisterPaste_data();

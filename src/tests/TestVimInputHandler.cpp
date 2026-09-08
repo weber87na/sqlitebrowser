@@ -21,6 +21,199 @@ void prepareEditor(QsciScintilla& editor)
 }
 }
 
+void TestVimInputHandler::searchFoldAndJumpRestoration()
+{
+    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    editor.setText("header\nhidden foo\nend"); handler.setEnabled(true); editor.setCursorPosition(0, 0);
+    const int base = QsciScintillaBase::SC_FOLDLEVELBASE;
+    editor.SendScintilla(QsciScintillaBase::SCI_SETFOLDLEVEL, 0, base | QsciScintillaBase::SC_FOLDLEVELHEADERFLAG);
+    editor.SendScintilla(QsciScintillaBase::SCI_SETFOLDLEVEL, 1, base + 1);
+    editor.SendScintilla(QsciScintillaBase::SCI_SETFOLDLEVEL, 2, base);
+    QTest::keyClicks(&editor, "zc/");
+    auto* prompt = editor.findChild<QLineEdit*>("vimSearchPrompt"); QVERIFY(prompt);
+    prompt->setText("foo");
+    QVERIFY(editor.SendScintilla(QsciScintillaBase::SCI_GETLINEVISIBLE, 1));
+    QTest::keyClick(prompt, Qt::Key_Escape);
+    QVERIFY(!editor.SendScintilla(QsciScintillaBase::SCI_GETLINEVISIBLE, 1));
+    QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 0L);
+    QTest::keyClicks(&editor, "/"); prompt->setText("foo"); QTest::keyClick(prompt, Qt::Key_Return);
+    QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 14L);
+    QVERIFY(editor.SendScintilla(QsciScintillaBase::SCI_GETLINEVISIBLE, 1));
+    QTest::keyClick(&editor, Qt::Key_O, Qt::ControlModifier);
+    QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 0L);
+}
+
+void TestVimInputHandler::searchFocusCancellation()
+{
+    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    editor.setText("foo bar foo"); handler.setEnabled(true); editor.setCursorPosition(0, 0);
+    QTest::keyClicks(&editor, "/");
+    auto* prompt = editor.findChild<QLineEdit*>("vimSearchPrompt"); QVERIFY(prompt);
+    prompt->setText("foo");
+    QFocusEvent focusOut(QEvent::FocusOut, Qt::OtherFocusReason);
+    QCoreApplication::sendEvent(prompt, &focusOut);
+    QVERIFY(prompt->isHidden());
+    QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 0L);
+    QCOMPARE(handler.mode(), VimInputHandler::Mode::Normal);
+}
+
+void TestVimInputHandler::searchNavigation_data()
+{
+    QTest::addColumn<QString>("document");
+    QTest::addColumn<QString>("pattern");
+    QTest::addColumn<QString>("command");
+    QTest::addColumn<int>("start");
+    QTest::addColumn<int>("expected");
+    QTest::newRow("forward excludes origin") << "foo x foo y foo" << "foo" << "/" << 0 << 6;
+    QTest::newRow("backward wraps at start") << "foo x foo y foo" << "foo" << "?" << 0 << 12;
+    QTest::newRow("forward wraps at end") << "x x" << "x" << "/" << 2 << 0;
+    QTest::newRow("counted prompt") << "foo x foo y foo" << "foo" << "2/" << 0 << 12;
+    QTest::newRow("counted backward") << "foo x foo y foo" << "foo" << "2?" << 0 << 6;
+    QTest::newRow("unicode byte positions") << QString::fromUtf8("猫 a 猫 b 猫") << QString::fromUtf8("猫") << "/" << 0 << 6;
+    QTest::newRow("CRLF multiline anchors") << "foo\r\nbar\r\nfoo" << "^foo" << "/" << 0 << 10;
+    QTest::newRow("CRLF end anchors") << "foo\r\nbar\r\nfoo" << "^foo$" << "?" << 10 << 0;
+    QTest::newRow("zero length") << "ab cd" << "(?=c)" << "/" << 0 << 3;
+    QTest::newRow("missing") << "abc" << "missing" << "/" << 1 << 1;
+}
+
+void TestVimInputHandler::searchNavigation()
+{
+    QFETCH(QString, document); QFETCH(QString, pattern); QFETCH(QString, command);
+    QFETCH(int, start); QFETCH(int, expected);
+    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    editor.setText(document); handler.setEnabled(true);
+    editor.SendScintilla(QsciScintillaBase::SCI_SETEMPTYSELECTION, start);
+    editor.SendScintilla(QsciScintillaBase::SCI_EMPTYUNDOBUFFER);
+    QTest::keyClicks(&editor, command);
+    auto* prompt = editor.findChild<QLineEdit*>("vimSearchPrompt"); QVERIFY(prompt);
+    prompt->setText(pattern);
+    QCOMPARE(int(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS)), expected);
+    QTest::keyClick(prompt, Qt::Key_Return);
+    QVERIFY(prompt->isHidden());
+    QCOMPARE(int(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS)), expected);
+    QCOMPARE(editor.text(), document);
+    QVERIFY(!editor.isUndoAvailable());
+}
+
+void TestVimInputHandler::searchPreviewCancellation()
+{
+    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    editor.setText("foo xx foo yy foo"); handler.setEnabled(true); editor.setCursorPosition(0, 0);
+    QTest::keyClicks(&editor, "/");
+    auto* prompt = editor.findChild<QLineEdit*>("vimSearchPrompt"); QVERIFY(prompt);
+    prompt->setText("foo");
+    QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 7L);
+    QTest::keyClick(prompt, Qt::Key_Return);
+    QTest::keyClicks(&editor, "2n");
+    QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 0L);
+    QTest::keyClicks(&editor, "N");
+    QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 14L);
+    QTest::keyClicks(&editor, "/"); prompt->setText("xx");
+    QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 4L);
+    prompt->setText("missing");
+    QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 14L);
+    QTest::keyClick(prompt, Qt::Key_Escape);
+    QTest::keyClicks(&editor, "n");
+    QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 0L);
+    QTest::keyClicks(&editor, "l"); // Counts must not leak into following commands.
+    QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 1L);
+}
+
+void TestVimInputHandler::searchHistoryAndInvalidPatterns()
+{
+    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    editor.setText("foo bar foo bar"); handler.setEnabled(true); editor.setCursorPosition(0, 0);
+    QTest::keyClicks(&editor, "/");
+    auto* prompt = editor.findChild<QLineEdit*>("vimSearchPrompt"); QVERIFY(prompt);
+    prompt->setText("foo"); QTest::keyClick(prompt, Qt::Key_Return);
+    QTest::keyClicks(&editor, "?"); prompt->setText("bar"); QTest::keyClick(prompt, Qt::Key_Return);
+    QTest::keyClicks(&editor, "/"); prompt->setText("draft");
+    QTest::keyClick(prompt, Qt::Key_Up); QCOMPARE(prompt->text(), QString("bar"));
+    QTest::keyClick(prompt, Qt::Key_Up); QCOMPARE(prompt->text(), QString("foo"));
+    QTest::keyClick(prompt, Qt::Key_Down); QCOMPARE(prompt->text(), QString("bar"));
+    QTest::keyClick(prompt, Qt::Key_Down); QCOMPARE(prompt->text(), QString("draft"));
+    prompt->setText("["); QTest::keyClick(prompt, Qt::Key_Return);
+    QVERIFY(!prompt->isHidden()); QVERIFY(!prompt->toolTip().isEmpty());
+    QTest::keyClick(prompt, Qt::Key_BracketLeft, Qt::ControlModifier);
+    QVERIFY(prompt->isHidden());
+    QTest::keyClicks(&editor, "/"); QVERIFY(prompt->text().isEmpty());
+    QTest::keyClick(prompt, Qt::Key_Return); // Empty input reuses bar, now forward.
+    QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 12L);
+    QTest::keyClicks(&editor, "n");
+    QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 4L);
+}
+
+void TestVimInputHandler::searchHighlightLifecycle()
+{
+    QsciScintilla editor; prepareEditor(editor);
+    const int other = editor.indicatorDefine(QsciScintilla::SquiggleIndicator);
+    VimInputHandler handler(&editor);
+    editor.setText("foo x foo"); handler.setEnabled(true); editor.setCursorPosition(0, 0);
+    editor.SendScintilla(QsciScintillaBase::SCI_SETINDICATORCURRENT, other);
+    editor.SendScintilla(QsciScintillaBase::SCI_INDICATORFILLRANGE, 0, 3);
+    const auto marks = [&](int pos) { return editor.SendScintilla(QsciScintillaBase::SCI_INDICATORALLONFOR, pos); };
+    const long otherMask = marks(0); QVERIFY(otherMask != 0);
+    QTest::keyClicks(&editor, "/");
+    auto* prompt = editor.findChild<QLineEdit*>("vimSearchPrompt"); QVERIFY(prompt);
+    prompt->setText("foo"); QTest::keyClick(prompt, Qt::Key_Return);
+    const long searchMask = marks(6); QVERIFY(searchMask != 0); QVERIFY(searchMask != otherMask);
+    QCOMPARE(marks(0), searchMask | otherMask);
+    QVERIFY(handler.executeCommand("noh")); QCOMPARE(marks(0), otherMask); QCOMPARE(marks(6), 0L);
+    QTest::keyClicks(&editor, "n"); QCOMPARE(marks(6), searchMask);
+    editor.SendScintilla(QsciScintillaBase::SCI_INSERTTEXT, static_cast<uintptr_t>(9), " foo");
+    QCOMPARE(marks(10), searchMask);
+    editor.setReadOnly(true); QTest::keyClicks(&editor, "n"); QCOMPARE(marks(10), searchMask);
+    QTest::keyClicks(&editor, "/"); prompt->setText("x");
+    QTest::keyClick(prompt, Qt::Key_Escape); QCOMPARE(marks(6), searchMask);
+    handler.setEnabled(false); QCOMPARE(marks(6), 0L); QCOMPARE(marks(0), otherMask);
+}
+
+void TestVimInputHandler::searchVisualAndTemporaryNormal()
+{
+    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    editor.setText("foo x foo y foo"); handler.setEnabled(true); editor.setCursorPosition(0, 0);
+    QTest::keyClicks(&editor, "v/");
+    auto* prompt = editor.findChild<QLineEdit*>("vimSearchPrompt"); QVERIFY(prompt);
+    prompt->setText("foo"); QCOMPARE(editor.selectedText(), QString("foo x f"));
+    QTest::keyClick(prompt, Qt::Key_Escape); QCOMPARE(editor.selectedText(), QString("f"));
+    QTest::keyClicks(&editor, "/"); prompt->setText("foo"); QTest::keyClick(prompt, Qt::Key_Return);
+    QTest::keyClicks(&editor, "n"); QCOMPARE(editor.selectedText(), QString("foo x foo y f"));
+    QTest::keyClick(&editor, Qt::Key_Escape);
+    editor.setCursorPosition(0, 0); QTest::keyClicks(&editor, "i");
+    QTest::keyClick(&editor, Qt::Key_O, Qt::ControlModifier); QTest::keyClicks(&editor, "/");
+    prompt->setText("foo"); QCOMPARE(handler.mode(), VimInputHandler::Mode::Normal);
+    QTest::keyClick(prompt, Qt::Key_Return); QCOMPARE(handler.mode(), VimInputHandler::Mode::Insert);
+    QCOMPARE(editor.text(), QString("foo x foo y foo"));
+    QTest::keyClicks(&editor, "!"); QCOMPARE(editor.text(), QString("foo x !foo y foo"));
+    QTest::keyClick(&editor, Qt::Key_Escape);
+    QTest::keyClicks(&editor, "i"); QTest::keyClick(&editor, Qt::Key_O, Qt::ControlModifier);
+    QTest::keyClicks(&editor, "/"); prompt->setText("foo");
+    editor.SendScintilla(QsciScintillaBase::SCI_INSERTTEXT, static_cast<uintptr_t>(0), "!");
+    QVERIFY(prompt->isHidden()); QTest::keyClicks(&editor, "h");
+    QCOMPARE(handler.mode(), VimInputHandler::Mode::Normal);
+}
+
+void TestVimInputHandler::searchMacrosAndMappings()
+{
+    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    editor.setText("foo x foo y foo"); handler.setEnabled(true); editor.setCursorPosition(0, 0);
+    QTest::keyClicks(&editor, "qa/");
+    auto* prompt = editor.findChild<QLineEdit*>("vimSearchPrompt"); QVERIFY(prompt);
+    QTest::keyClicks(prompt, "foo"); QTest::keyClick(prompt, Qt::Key_Return);
+    QTest::keyClicks(&editor, "q@a");
+    QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 12L);
+    QVERIFY(prompt->isHidden()); QCOMPARE(editor.text(), QString("foo x foo y foo"));
+    QTemporaryFile config; QVERIFY(config.open());
+    config.write("{\"mappings\":{\"n:Q\":\"/foo<CR>\"}}"); config.flush();
+    QVERIFY(handler.loadConfig(config.fileName()));
+    QTest::keyClicks(&editor, "Q");
+    QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 0L);
+    QTest::keyClicks(&editor, "i"); QTest::keyClick(&editor, Qt::Key_O, Qt::ControlModifier);
+    QTest::keyClicks(&editor, "@a");
+    QCOMPARE(handler.mode(), VimInputHandler::Mode::Insert);
+    QCOMPARE(editor.text(), QString("foo x foo y foo"));
+}
+
 void TestVimInputHandler::nativeFolding()
 {
     QsciScintilla editor;

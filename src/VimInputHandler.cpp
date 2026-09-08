@@ -5,7 +5,6 @@
 #include <QApplication>
 #include <QAction>
 #include <QClipboard>
-#include <QInputDialog>
 #include <QKeyEvent>
 #include <QLineEdit>
 #include <QStringList>
@@ -295,6 +294,8 @@ VimInputHandler::VimInputHandler(QsciScintilla* editor, QObject* parent) :
                 finishSubstituteConfirmation(false);
         });
     connect(m_editor, &QsciScintilla::textChanged, this, [this]() {
+        if(m_searchActive) finishSearch(false, false, false);
+        if(m_searchHighlight) paintSearch(m_lastSearch);
         if(m_substituteActive && !m_substituteChanging) finishSubstituteConfirmation(false);
         if(!m_completionChanging) resetInsertCompletion();
         const QByteArray next = m_editor->text().toUtf8();
@@ -321,6 +322,8 @@ VimInputHandler::~VimInputHandler()
 {
     if(m_editor)
     {
+        finishSearch(false, false, false);
+        paintSearch(QString());
         finishSubstituteConfirmation(false);
         if(m_groupOpen) m_editor->endUndoAction();
         m_editor->removeEventFilter(this);
@@ -332,6 +335,9 @@ void VimInputHandler::setEnabled(bool enabled)
     if(m_enabled == enabled)
         return;
 
+    finishSearch(false);
+    paintSearch(QString());
+    m_searchHighlight = false;
     finishSubstituteConfirmation(false);
     if(m_groupOpen) { m_editor->endUndoAction(); m_groupOpen = false; }
     m_sequence.clear();
@@ -359,6 +365,47 @@ VimInputHandler::Mode VimInputHandler::mode() const
 
 bool VimInputHandler::eventFilter(QObject* watched, QEvent* event)
 {
+    if(m_searchActive)
+    {
+        if(watched == m_editor && event->type() == QEvent::KeyPress)
+        {
+            if(!m_forwarding)
+            {
+                QScopedValueRollback<bool> forwarding(m_forwarding, true);
+                QCoreApplication::sendEvent(m_searchPrompt, event);
+            }
+            return true;
+        }
+        if(watched == m_searchPrompt && event->type() == QEvent::ShortcutOverride)
+        { event->accept(); return true; }
+        if(watched == m_searchPrompt && event->type() == QEvent::FocusOut)
+            finishSearch(false, true, false);
+        if(watched == m_editor && (event->type() == QEvent::MouseButtonPress ||
+           event->type() == QEvent::MouseButtonDblClick))
+            finishSearch(false, true, false);
+        if(watched == m_editor && event->type() == QEvent::Resize)
+            m_searchPrompt->setGeometry(4, m_editor->height()-32, std::max(60, m_editor->width()-8), 28);
+        if(watched == m_searchPrompt && event->type() == QEvent::KeyPress)
+        {
+            auto* key = static_cast<QKeyEvent*>(event);
+            if(!m_recording.isEmpty() && m_replayDepth == 0 && !m_forwarding)
+                m_macros[m_recording].append({key->key(), key->modifiers(), key->text()});
+            if(key->key() == Qt::Key_Escape || (key->key() == Qt::Key_BracketLeft &&
+               key->modifiers() == Qt::ControlModifier))
+            { finishSearch(false); return true; }
+            if(key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter)
+            { finishSearch(true); return true; }
+            if(key->key() == Qt::Key_Up || key->key() == Qt::Key_Down)
+            {
+                if(m_searchHistoryIndex == m_searchHistory.size()) m_searchDraft = m_searchPrompt->text();
+                m_searchHistoryIndex = std::max(0, std::min(m_searchHistory.size(),
+                    m_searchHistoryIndex + (key->key() == Qt::Key_Up ? -1 : 1)));
+                m_searchPrompt->setText(m_searchHistoryIndex == m_searchHistory.size() ?
+                    m_searchDraft : m_searchHistory.at(m_searchHistoryIndex));
+                return true;
+            }
+        }
+    }
     if(m_substituteActive && (watched == m_editor || watched == m_substitutePrompt))
     {
         if(event->type() == QEvent::ShortcutOverride)
@@ -433,7 +480,7 @@ bool VimInputHandler::handleKeyPress(QKeyEvent* event)
        m_insertPauses.last().depth == m_keyDispatchDepth &&
        (m_mode == Mode::Normal || m_mode == Mode::Insert) &&
        m_pendingCommand.isEmpty() && m_mappingPrefix.isEmpty() && m_count == 0 &&
-       pending != "\"" && !m_substituteActive && (!m_commandLine || m_commandLine->isHidden()))
+       pending != "\"" && !m_substituteActive && !m_searchActive && (!m_commandLine || m_commandLine->isHidden()))
         finishTemporaryNormal(key, history, pending);
     --m_keyDispatchDepth;
     return handled;
@@ -517,6 +564,8 @@ void VimInputHandler::finishTemporaryNormal(const QString& key, bool history, co
 
 bool VimInputHandler::handleKeyPressImpl(QKeyEvent* event)
 {
+    if(m_searchActive)
+    { QCoreApplication::sendEvent(m_searchPrompt, event); return true; }
     const bool completionKey = m_mode == Mode::Insert && !m_insertRegisterPending && event->modifiers() == Qt::ControlModifier &&
         (event->key() == Qt::Key_N || event->key() == Qt::Key_P);
     if(!completionKey) resetInsertCompletion();
@@ -1460,6 +1509,8 @@ bool VimInputHandler::handleVisualKey(QKeyEvent* event)
     if(m_pendingCommand == "\"") return extendedPending(key);
     if(m_pendingCommand.isEmpty() && key == "\"")
     { m_pendingCommand = key; m_pendingCount = takeCount(); return true; }
+    if(key == "/" || key == "?") { promptSearch(key == "/"); return true; }
+    if(key == "n" || key == "N") { repeatSearch(key == "N"); return true; }
     if(key == ":") { promptCommand(); return true; }
     if(m_mode == Mode::VisualBlock && (key == "d" || key == "x" || key == "y" || key == "c" || key == "I" || key == "A"))
     { finishBlockOperator(key == "x" ? "d" : key); return true; }
@@ -2943,53 +2994,174 @@ void VimInputHandler::finishVisualOperator(const QString& command)
     clampNormalCaret();
 }
 
+QVector<QPair<int, int>> VimInputHandler::searchMatches(const QString& pattern) const
+{
+    QVector<QPair<int, int>> matches;
+    if(pattern.isEmpty()) return matches;
+    const QRegularExpression expression("(*ANYCRLF)" + pattern, QRegularExpression::MultilineOption |
+        QRegularExpression::UseUnicodePropertiesOption);
+    if(!expression.isValid()) return matches;
+    const QString text = m_editor->text();
+    auto iterator = expression.globalMatch(text);
+    int previous = 0, bytes = 0;
+    while(iterator.hasNext())
+    {
+        const auto match = iterator.next();
+        const int start = match.capturedStart(), end = match.capturedEnd();
+        bytes += text.mid(previous, start-previous).toUtf8().size();
+        const int size = text.mid(start, end-start).toUtf8().size();
+        matches.append(qMakePair(bytes, size));
+        previous = start;
+    }
+    return matches;
+}
+
+bool VimInputHandler::moveToSearch(const QString& pattern, bool forward, int start, int count)
+{
+    const auto matches = searchMatches(pattern);
+    if(matches.isEmpty()) return false;
+    int index = forward ? 0 : matches.size()-1;
+    if(forward)
+    {
+        while(index < matches.size() && matches.at(index).first <= start) ++index;
+        index %= matches.size();
+    }
+    else
+    {
+        while(index >= 0 && matches.at(index).first >= start) --index;
+        if(index < 0) index = matches.size()-1;
+    }
+    const int offset = (std::max(1, count)-1) % matches.size();
+    index = (index + (forward ? offset : -offset) + matches.size()) % matches.size();
+    const int target = matches.at(index).first;
+    m_editor->SendScintilla(QsciScintillaBase::SCI_ENSUREVISIBLE,
+        m_editor->SendScintilla(QsciScintillaBase::SCI_LINEFROMPOSITION, target));
+    if(m_mode == Mode::Visual || m_mode == Mode::VisualLine || m_mode == Mode::VisualBlock)
+    { m_visualCaret = target; updateVisualSelection(); }
+    else { setPosition(target); clampNormalCaret(); }
+    m_editor->SendScintilla(QsciScintillaBase::SCI_CHOOSECARETX);
+    m_editor->SendScintilla(QsciScintillaBase::SCI_SCROLLCARET);
+    return true;
+}
+
+void VimInputHandler::paintSearch(const QString& pattern)
+{
+    if(m_searchIndicator < 0 && !pattern.isEmpty())
+    {
+        m_searchIndicator = m_editor->indicatorDefine(QsciScintilla::StraightBoxIndicator);
+        if(m_searchIndicator >= 0)
+        {
+            m_editor->setIndicatorForegroundColor(QColor(255, 184, 108), m_searchIndicator);
+            m_editor->setIndicatorDrawUnder(true, m_searchIndicator);
+        }
+    }
+    if(m_searchIndicator < 0) return;
+    const int previous = int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETINDICATORCURRENT));
+    m_editor->SendScintilla(QsciScintillaBase::SCI_SETINDICATORCURRENT, m_searchIndicator);
+    m_editor->SendScintilla(QsciScintillaBase::SCI_INDICATORCLEARRANGE, 0, documentLength());
+    for(const auto& match : searchMatches(pattern))
+        if(match.second > 0)
+            m_editor->SendScintilla(QsciScintillaBase::SCI_INDICATORFILLRANGE, match.first, match.second);
+    m_editor->SendScintilla(QsciScintillaBase::SCI_SETINDICATORCURRENT, previous);
+}
+
 void VimInputHandler::promptSearch(bool forward)
 {
-    bool accepted = false;
-    const QString text = QInputDialog::getText(m_editor, tr("Vim search"),
-                                                forward ? tr("Find forward:") : tr("Find backward:"),
-                                                QLineEdit::Normal, m_lastSearch, &accepted);
-    if(!accepted || text.isEmpty())
-        return;
+    if(m_searchActive || m_substituteActive) return;
+    m_searchOrigin = (m_mode == Mode::Visual || m_mode == Mode::VisualLine || m_mode == Mode::VisualBlock) ?
+        m_visualCaret : currentPosition();
+    m_searchAnchor = int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETANCHOR));
+    m_searchTop = int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETFIRSTVISIBLELINE));
+    m_searchX = int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETXOFFSET));
+    m_searchForward = forward;
+    m_searchCount = takeCount();
+    m_searchClosedFolds.clear();
+    for(int line = 0; line < m_editor->lines(); ++line)
+        if((m_editor->SendScintilla(QsciScintillaBase::SCI_GETFOLDLEVEL, line) & QsciScintillaBase::SC_FOLDLEVELHEADERFLAG) &&
+           !m_editor->SendScintilla(QsciScintillaBase::SCI_GETFOLDEXPANDED, line))
+            m_searchClosedFolds.append(line);
+    if(!m_searchPrompt)
+    {
+        m_searchPrompt = new QLineEdit(m_editor);
+        m_searchPrompt->setObjectName("vimSearchPrompt");
+        m_searchPrompt->installEventFilter(this);
+        connect(m_searchPrompt, &QLineEdit::textChanged, this, [this]() { previewSearch(); });
+    }
+    m_searchPrompt->setPlaceholderText(forward ? tr("/ Search; Enter: accept, Esc: cancel") :
+        tr("? Search; Enter: accept, Esc: cancel"));
+    m_searchPrompt->clear();
+    m_searchDraft.clear();
+    m_searchHistoryIndex = m_searchHistory.size();
+    m_searchActive = true;
+    m_searchPrompt->setGeometry(4, m_editor->height()-32, std::max(60, m_editor->width()-8), 28);
+    m_searchPrompt->show(); m_searchPrompt->raise(); m_searchPrompt->setFocus();
+}
 
-    m_lastSearch = text;
-    m_lastSearchForward = forward;
-    repeatSearch(false);
+void VimInputHandler::restoreSearchOrigin()
+{
+    for(int line : m_searchClosedFolds)
+        if(m_editor->SendScintilla(QsciScintillaBase::SCI_GETFOLDEXPANDED, line))
+            m_editor->SendScintilla(QsciScintillaBase::SCI_FOLDLINE, line, QsciScintillaBase::SC_FOLDACTION_CONTRACT);
+    if(m_mode == Mode::Visual || m_mode == Mode::VisualLine || m_mode == Mode::VisualBlock)
+    { m_visualCaret = m_searchOrigin; updateVisualSelection(); }
+    else setSelection(m_searchAnchor, m_searchOrigin);
+    m_editor->SendScintilla(QsciScintillaBase::SCI_SETFIRSTVISIBLELINE, m_searchTop);
+    m_editor->SendScintilla(QsciScintillaBase::SCI_SETXOFFSET, m_searchX);
+}
+
+void VimInputHandler::previewSearch()
+{
+    if(!m_searchActive) return;
+    restoreSearchOrigin();
+    const QString pattern = m_searchPrompt->text();
+    paintSearch(pattern.isEmpty() && m_searchHighlight ? m_lastSearch : pattern);
+    const bool valid = QRegularExpression(pattern).isValid();
+    const bool found = !pattern.isEmpty() && valid && moveToSearch(pattern, m_searchForward, m_searchOrigin, m_searchCount);
+    m_searchPrompt->setToolTip(pattern.isEmpty() ? QString() : !valid ? tr("Invalid regular expression") :
+        !found ? tr("Pattern not found") : QString());
+}
+
+void VimInputHandler::finishSearch(bool accept, bool restore, bool focus)
+{
+    if(!m_searchActive) return;
+    const QString pattern = m_searchPrompt->text().isEmpty() ? m_lastSearch : m_searchPrompt->text();
+    if(accept && !QRegularExpression(pattern).isValid()) return;
+    m_searchActive = false;
+    if(accept && !pattern.isEmpty())
+    {
+        m_lastSearch = pattern;
+        m_lastSearchForward = m_searchForward;
+        m_searchHighlight = true;
+        m_searchHistory.removeAll(pattern);
+        m_searchHistory.append(pattern);
+        if(m_searchHistory.size() > 100) m_searchHistory.removeFirst();
+        moveToSearch(pattern, m_searchForward, m_searchOrigin, m_searchCount);
+        if(m_mode == Mode::Normal && currentPosition() != m_searchOrigin)
+        {
+            if(m_jumpIndex+1 < m_jumps.size()) m_jumps.resize(m_jumpIndex+1);
+            if(m_jumps.isEmpty() || m_jumps.last() != m_searchOrigin) m_jumps.append(m_searchOrigin);
+            m_jumps.append(currentPosition());
+            if(m_jumps.size() > 100) m_jumps.removeFirst();
+            m_jumpIndex = m_jumps.size()-1;
+        }
+    }
+    else if(restore) restoreSearchOrigin();
+    m_searchClosedFolds.clear();
+    paintSearch(m_searchHighlight ? m_lastSearch : QString());
+    m_searchPrompt->hide();
+    if(focus) { m_editor->setFocus(); if(m_replayDepth == 0) finishTemporaryNormal("/"); }
+    else m_insertPauses.clear();
 }
 
 void VimInputHandler::repeatSearch(bool reverse)
 {
-    if(m_lastSearch.isEmpty())
-        return;
-
-    const bool forward = reverse ? !m_lastSearchForward : m_lastSearchForward;
-    int line = 0;
-    int index = 0;
-    m_editor->getCursorPosition(&line, &index);
-
-    // Move one character first so repeated searches do not find the same item.
-    const int start = currentPosition();
-    if(forward && start < documentLength())
-        setPosition(positionAfter(start));
-    else if(!forward && start > 0)
-        setPosition(positionBefore(start));
-    m_editor->getCursorPosition(&line, &index);
-
-    if(m_editor->findFirst(m_lastSearch, true, true, false, true, forward,
-                           line, index, true, true, true))
-    {
-        int lineFrom = 0;
-        int indexFrom = 0;
-        int lineTo = 0;
-        int indexTo = 0;
-        m_editor->getSelection(&lineFrom, &indexFrom, &lineTo, &indexTo);
-        m_editor->setCursorPosition(lineFrom, indexFrom);
-        clampNormalCaret();
-    }
-    else
-    {
-        setPosition(start);
-    }
+    const int count = takeCount();
+    if(m_lastSearch.isEmpty()) return;
+    m_searchHighlight = true;
+    paintSearch(m_lastSearch);
+    const int start = (m_mode == Mode::Visual || m_mode == Mode::VisualLine || m_mode == Mode::VisualBlock) ?
+        m_visualCaret : currentPosition();
+    moveToSearch(m_lastSearch, reverse ? !m_lastSearchForward : m_lastSearchForward, start, count);
 }
 
 bool VimInputHandler::processStroke(QKeyEvent* event)
@@ -3389,7 +3561,7 @@ void VimInputHandler::promptCommand()
 
 bool VimInputHandler::executeCommand(const QString& input)
 {
-    if(m_substituteActive) return false;
+    if(m_substituteActive || m_searchActive) return false;
     QString command = input.trimmed();
     if(command.startsWith(':')) command = command.mid(1).trimmed();
     if(command == "w" || command == "write")
@@ -3397,7 +3569,7 @@ bool VimInputHandler::executeCommand(const QString& input)
         if(auto* action = m_editor->window()->findChild<QAction*>("actionSqlSaveFile")) { action->trigger(); return true; }
         return false;
     }
-    if(command == "noh" || command == "nohlsearch") { setPosition(currentPosition()); return true; }
+    if(command == "noh" || command == "nohlsearch") { m_searchHighlight = false; paintSearch(QString()); return true; }
 
     // Scintilla exposes an extra empty line after a final EOL. Ex addresses,
     // unlike editor cursor positions, refer to actual buffer lines only.

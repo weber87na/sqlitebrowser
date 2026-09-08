@@ -135,6 +135,20 @@ private:
 
     void promptSearch(bool forward);
     void repeatSearch(bool reverse);
+    QVector<QPair<int, int>> searchMatches(const QString& pattern) const;
+    bool moveToSearch(const QString& pattern, bool forward, int start, int count);
+    void paintSearch(const QString& pattern);
+    void previewSearch();
+    void restoreSearchOrigin();
+    QVector<int> m_searchClosedFolds;
+    void finishSearch(bool accept, bool restore = true, bool focus = true);
+    QLineEdit* m_searchPrompt = nullptr;
+    QStringList m_searchHistory;
+    QString m_searchDraft;
+    bool m_searchActive = false, m_searchForward = true, m_searchHighlight = false;
+    int m_searchOrigin = 0, m_searchAnchor = 0, m_searchCount = 1;
+    int m_searchTop = 0, m_searchX = 0, m_searchHistoryIndex = 0;
+    int m_searchIndicator = -1;
 
     struct Stroke
     {
