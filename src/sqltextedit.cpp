@@ -71,6 +71,20 @@ SqlTextEdit::SqlTextEdit(QWidget* parent) :
     reloadSettings();
 }
 
+void SqlTextEdit::setText(const QString& text)
+{
+    m_vimInputHandler->resetDocumentState();
+    ExtendedScintilla::setText(text);
+    // Also synchronize after replacement if the host blocked textChanged signals.
+    m_vimInputHandler->resetDocumentState();
+}
+
+void SqlTextEdit::clear()
+{
+    if(isReadOnly()) return;
+    setText(QString());
+}
+
 void SqlTextEdit::reloadSettings()
 {
     // Enable auto completion if it hasn't been disabled
