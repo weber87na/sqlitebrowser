@@ -2558,6 +2558,7 @@ void TestVimInputHandler::globalEditing()
         editor.SendScintilla(QsciScintillaBase::SCI_EMPTYUNDOBUFFER);
         editor.setReadOnly(true); QVERIFY(!handler.executeCommand(command)); editor.setReadOnly(false);
         QVERIFY2(handler.executeCommand(command), qPrintable(command)); QCOMPARE(editor.text(), eol(expected));
+        if(command == "g/x/j") QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), crlf ? 3L : 2L);
         if(source != expected)
         { editor.undo(); QCOMPARE(editor.text(), eol(source)); editor.redo(); QCOMPARE(editor.text(), eol(expected)); }
         else QVERIFY(!editor.SendScintilla(QsciScintillaBase::SCI_CANUNDO));

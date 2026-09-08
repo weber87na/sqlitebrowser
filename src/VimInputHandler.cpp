@@ -3982,8 +3982,9 @@ bool VimInputHandler::executeCommandImpl(const QString& input)
             const int line = original - removed;
             if(joining)
             {
+                setPosition(positionFromLine(line));
                 if(original + 1 >= lineCount) continue;
-                setPosition(positionFromLine(line)); joinLines(2, operation.endsWith('!'));
+                joinLines(2, operation.endsWith('!'));
                 consumedThrough = original + 1; ++removed;
             }
             else
