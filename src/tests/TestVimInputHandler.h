@@ -64,6 +64,12 @@ private slots:
     void builtinCommands_data();
     void builtinCommands();
     void repeatAndMacro();
+    void documentResetPending_data();
+    void documentResetPending();
+    void documentResetHistoryAndRetention();
+    void documentResetPrompts();
+    void documentHistoryIsolation();
+    void documentResetReusableText();
     void globalEditing_data();
     void globalEditing();
     void globalValidationAndRegisters();

@@ -22,6 +22,8 @@ public:
     static SqlUiLexer* sqlLexer;
 
 public slots:
+    void setText(const QString& text) override;
+    void clear() override;
     void reloadSettings();
     void toggleBlockComment();
 

@@ -46,6 +46,9 @@ public:
     // confirmation started; it does not imply that text was already changed.
     bool executeCommand(const QString& command);
     bool loadConfig(const QString& path);
+    // Call before and after a host replaces the whole document (even identical text).
+    // Preserve reusable text registers/macros/searches, discard document positions and pending edits.
+    void resetDocumentState();
 
 signals:
     void modeChanged();
@@ -210,6 +213,7 @@ private:
     QString m_findCommand, m_findTarget;
     int m_savedAnchor = 0, m_savedCaret = 0;
     Mode m_savedVisualMode = Mode::Visual;
+    bool m_hasSavedVisual = false;
     bool m_replace = false;
     struct ReplaceEdit { int start; QByteArray original, inserted; };
     QVector<ReplaceEdit> m_replaceEdits;

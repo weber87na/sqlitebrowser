@@ -338,6 +338,41 @@ VimInputHandler::~VimInputHandler()
     }
 }
 
+void VimInputHandler::resetDocumentState()
+{
+    if(!m_editor) return;
+    // Cancel, never finish, insertion broadcasts or counts on a document boundary.
+    m_mappingTimer->stop(); m_mappingPrefix.clear();
+    m_blockInsert = false; m_blockBefore.clear();
+    m_insertRepeat = 1; m_repeatNewline = false;
+    m_insertPauses.clear();
+    finishSearch(false, false, false);
+    finishSubstituteConfirmation(false);
+    if(m_commandLine) { m_commandLine->hide(); m_commandLine->clear(); }
+    if(m_groupOpen) { m_editor->endUndoAction(); m_groupOpen = false; }
+    resetInsertCompletion();
+    m_replace = false; m_replaceEdits.clear(); m_editor->setOverwriteMode(false);
+    m_insertRegisterPending = false; m_selectedRegister.clear(); resetPendingCommand();
+    m_sequence.clear(); m_lastChange.clear(); m_replayBudget = 0;
+    if(!m_recording.isEmpty()) { m_macros.remove(m_recording); m_recording.clear(); }
+    setMode(m_enabled ? Mode::Normal : Mode::Insert);
+    m_editor->SendScintilla(QsciScintillaBase::SCI_SETSELECTIONMODE, QsciScintillaBase::SC_SEL_STREAM);
+    setPosition(0);
+    m_editor->SendScintilla(QsciScintillaBase::SCI_CHOOSECARETX);
+    m_marks.clear(); m_jumps.clear(); m_jumpIndex = -1;
+    m_changes.clear(); m_changeIndex = 0;
+    m_savedAnchor = m_savedCaret = m_visualAnchor = m_visualCaret = 0;
+    m_hasSavedVisual = false; m_visualTagSelected = false;
+    m_findCommand.clear(); m_findTarget.clear();
+    m_insertStart = m_insertBackspaceStart = 0; m_insertTextEntered = false;
+    m_blockFirst = m_blockLast = m_blockColumn = m_blockStart = 0;
+    m_trackedText = m_editor->text().toUtf8();
+    m_changeBefore = m_insertBefore = m_editor->text();
+    m_searchHighlight = false; paintSearch(QString());
+    m_searchClosedFolds.clear(); m_searchDraft.clear();
+    m_substituteChangeRecorded = false;
+}
+
 void VimInputHandler::setEnabled(bool enabled)
 {
     if(m_enabled == enabled)
@@ -1683,6 +1718,7 @@ void VimInputHandler::setMode(Mode mode)
 
     if(m_mode == Mode::Visual || m_mode == Mode::VisualLine || m_mode == Mode::VisualBlock)
     {
+        m_hasSavedVisual = true;
         m_savedAnchor = m_visualAnchor; m_savedCaret = m_visualCaret; m_savedVisualMode = m_mode;
         m_marks["<"] = std::min(m_visualAnchor, m_visualCaret);
         m_marks[">"] = std::max(m_visualAnchor, m_visualCaret);
@@ -3483,7 +3519,9 @@ bool VimInputHandler::extendedPending(const QString& key)
     if(pending == "g" && key == "J") { int count = m_pendingCount; resetPendingCommand(); joinLines(count, true); return true; }
     if(pending == "g" && key == "v")
     {
-        resetPendingCommand(); setMode(m_savedVisualMode);
+        resetPendingCommand();
+        if(!m_hasSavedVisual) return true;
+        setMode(m_savedVisualMode);
         m_visualAnchor = std::min(m_savedAnchor, documentLength()); m_visualCaret = std::min(m_savedCaret, documentLength());
         updateVisualSelection(); return true;
     }

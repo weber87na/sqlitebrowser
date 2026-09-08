@@ -2526,6 +2526,116 @@ void TestVimInputHandler::repeatAndMacro()
     QTest::keyClicks(&editor, "qaxjq@a"); QCOMPARE(editor.text(), QString("bc\nef\nghi"));
 }
 
+void TestVimInputHandler::documentResetPending_data()
+{
+    QTest::addColumn<QString>("keys");
+    QTest::newRow("counted insert") << "3iXY";
+    QTest::newRow("replace") << "RXY";
+    QTest::newRow("operator") << "2d";
+    QTest::newRow("register prefix") << "\"a";
+    QTest::newRow("visual") << "vj";
+    QTest::newRow("visual line") << "Vj";
+    QTest::newRow("block insertion") << QString(QChar(22)) + "jIXY";
+    QTest::newRow("insert register") << "i" + QString(QChar(18));
+    QTest::newRow("temporary normal") << "iX" + QString(QChar(15)) + "d";
+    QTest::newRow("partial macro") << "qaix";
+    QTest::newRow("mapping prefix") << "i,";
+}
+
+void TestVimInputHandler::documentResetPending()
+{
+    QFETCH(QString, keys);
+    TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor); handler.setEnabled(true);
+    editor.setText("old text\nnext line"); editor.setCursorPosition(0, 0);
+    for(QChar key : keys)
+    {
+        if(key.unicode() == 22) QTest::keyClick(&editor, Qt::Key_V, Qt::ControlModifier);
+        else if(key.unicode() == 18) QTest::keyClick(&editor, Qt::Key_R, Qt::ControlModifier);
+        else if(key.unicode() == 15) QTest::keyClick(&editor, Qt::Key_O, Qt::ControlModifier);
+        else QTest::keyClicks(&editor, QString(key));
+    }
+    const QString before = editor.text();
+    handler.resetDocumentState(); QCOMPARE(editor.text(), before); // Never broadcast pending insertions.
+    editor.blockSignals(true); editor.setText("fresh\nnew"); handler.resetDocumentState(); editor.blockSignals(false);
+    QCOMPARE(handler.mode(), VimInputHandler::Mode::Normal); QVERIFY(!editor.overwriteMode());
+    QTest::keyClicks(&editor, ".gv");
+    QCOMPARE(editor.text(), QString("fresh\nnew")); QCOMPARE(handler.mode(), VimInputHandler::Mode::Normal);
+    if(keys == "i,") QTest::qWait(800);
+    if(keys.startsWith("qa")) QTest::keyClicks(&editor, "@a");
+    QCOMPARE(editor.text(), QString("fresh\nnew"));
+    QTest::keyClicks(&editor, "x"); QCOMPARE(editor.text(), QString("resh\nnew"));
+    QTest::keyClicks(&editor, "u"); QCOMPARE(editor.text(), QString("fresh\nnew"));
+}
+
+void TestVimInputHandler::documentResetHistoryAndRetention()
+{
+    TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor); handler.setEnabled(true);
+    editor.setText("one\ntwo\nthree"); editor.setCursorPosition(0, 0);
+    QTest::keyClicks(&editor, "\"ayiwmaGix"); QTest::keyClick(&editor, Qt::Key_Escape);
+    QTest::keyClicks(&editor, "V"); QTest::keyClick(&editor, Qt::Key_Escape);
+    const QString same = editor.text();
+    handler.resetDocumentState(); editor.setText(same); handler.resetDocumentState();
+    QVERIFY(!handler.executeCommand("'a")); QVERIFY(!handler.executeCommand("'<"));
+    QTest::keyClicks(&editor, "ggg;"); QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 0L);
+    QTest::keyClick(&editor, Qt::Key_O, Qt::ControlModifier);
+    QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 0L);
+    QTest::keyClicks(&editor, "\"aP"); QVERIFY(editor.text().startsWith("oneone"));
+    QVERIFY(handler.executeCommand("2s/two/TWO/"));
+    QTest::keyClicks(&editor, "ggg;");
+    int line, column; editor.getCursorPosition(&line, &column); QCOMPARE(line, 1);
+    handler.setEnabled(false); handler.resetDocumentState();
+    QCOMPARE(handler.mode(), VimInputHandler::Mode::Insert); QVERIFY(!handler.isEnabled());
+}
+
+void TestVimInputHandler::documentResetPrompts()
+{
+    TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor); handler.setEnabled(true);
+    editor.setText("foo\nfoo"); editor.setCursorPosition(0, 0);
+    QTest::keyClicks(&editor, "/");
+    auto* search = editor.findChild<QLineEdit*>("vimSearchPrompt"); QVERIFY(search); search->setText("foo");
+    handler.resetDocumentState(); editor.setText("bar"); handler.resetDocumentState();
+    QVERIFY(search->isHidden()); QCOMPARE(editor.text(), QString("bar"));
+    QTest::keyClicks(&editor, ":");
+    handler.resetDocumentState();
+    for(auto* prompt : editor.findChildren<QLineEdit*>()) QVERIFY(prompt->isHidden());
+    editor.setText("foo\nfoo"); handler.resetDocumentState();
+    QVERIFY(handler.executeCommand("%s/foo/bar/gc"));
+    auto* confirm = editor.findChild<QLineEdit*>("vimSubstituteConfirmation"); QVERIFY(confirm);
+    QTest::keyClicks(confirm, "y"); handler.resetDocumentState();
+    editor.setText("fresh"); handler.resetDocumentState(); QVERIFY(confirm->isHidden());
+    QTest::keyClicks(&editor, "x"); QCOMPARE(editor.text(), QString("resh"));
+    QTest::keyClicks(&editor, "u"); QCOMPARE(editor.text(), QString("fresh"));
+}
+
+void TestVimInputHandler::documentResetReusableText()
+{
+    TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor); handler.setEnabled(true);
+    editor.setText("old"); editor.setCursorPosition(0, 0);
+    QTest::keyClicks(&editor, "qaiZ"); QTest::keyClick(&editor, Qt::Key_Escape); QTest::keyClicks(&editor, "q");
+    handler.resetDocumentState(); editor.setText("foo foo"); handler.resetDocumentState();
+    QTest::keyClicks(&editor, "@a"); QCOMPARE(editor.text(), QString("Zfoo foo"));
+    QTest::keyClicks(&editor, "/");
+    auto* search = editor.findChild<QLineEdit*>("vimSearchPrompt"); QVERIFY(search);
+    search->setText("foo"); QTest::keyClick(search, Qt::Key_Return);
+    handler.resetDocumentState(); editor.setText("foo"); handler.resetDocumentState();
+    QVERIFY(handler.executeCommand("s//X/")); QCOMPARE(editor.text(), QString("X"));
+    handler.resetDocumentState(); editor.setText("foo"); handler.resetDocumentState();
+    QVERIFY(handler.executeCommand("&")); QCOMPARE(editor.text(), QString("X"));
+}
+
+void TestVimInputHandler::documentHistoryIsolation()
+{
+    TestEditor first, second; VimInputHandler a(&first), b(&second);
+    prepareEditor(first); prepareEditor(second); a.setEnabled(true); b.setEnabled(true);
+    first.setText("a\nb"); second.setText("x\ny");
+    first.setCursorPosition(0, 0); second.setCursorPosition(0, 0);
+    QVERIFY(a.executeCommand("2s/b/B/")); QVERIFY(b.executeCommand("2s/y/Y/"));
+    a.resetDocumentState(); first.setText("new"); a.resetDocumentState();
+    QTest::keyClicks(&second, "ggg;");
+    QCOMPARE(second.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 2L);
+    QTest::keyClicks(&first, "g;"); QCOMPARE(first.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 0L);
+}
+
 void TestVimInputHandler::globalEditing_data()
 {
     QTest::addColumn<QString>("source"); QTest::addColumn<QString>("command"); QTest::addColumn<QString>("expected");
