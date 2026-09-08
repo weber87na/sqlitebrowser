@@ -15,6 +15,13 @@
 
 namespace
 {
+// Tests default to LF on every platform; CRLF cases select EolWindows explicitly.
+class TestEditor : public QsciScintilla
+{
+public:
+    TestEditor() { setEolMode(EolUnix); }
+};
+
 void prepareEditor(QsciScintilla& editor)
 {
     editor.resize(640, 320);
@@ -26,7 +33,7 @@ void TestVimInputHandler::searchEditorDestruction()
 {
     for(bool active : {false, true})
     {
-        auto* editor = new QsciScintilla;
+        auto* editor = new TestEditor;
         QPointer<VimInputHandler> handler = new VimInputHandler(editor, editor);
         editor->show();
         editor->setText("foo x foo"); handler->setEnabled(true); editor->setCursorPosition(0, 0);
@@ -42,7 +49,7 @@ void TestVimInputHandler::searchEditorDestruction()
 
 void TestVimInputHandler::searchFoldAndJumpRestoration()
 {
-    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor);
     editor.setText("header\nhidden foo\nend"); handler.setEnabled(true); editor.setCursorPosition(0, 0);
     const int base = QsciScintillaBase::SC_FOLDLEVELBASE;
     editor.SendScintilla(QsciScintillaBase::SCI_SETFOLDLEVEL, 0, base | QsciScintillaBase::SC_FOLDLEVELHEADERFLAG);
@@ -64,7 +71,7 @@ void TestVimInputHandler::searchFoldAndJumpRestoration()
 
 void TestVimInputHandler::searchFocusCancellation()
 {
-    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor);
     editor.setText("foo bar foo"); handler.setEnabled(true); editor.setCursorPosition(0, 0);
     QTest::keyClicks(&editor, "/");
     auto* prompt = editor.findChild<QLineEdit*>("vimSearchPrompt"); QVERIFY(prompt);
@@ -99,7 +106,7 @@ void TestVimInputHandler::searchNavigation()
 {
     QFETCH(QString, document); QFETCH(QString, pattern); QFETCH(QString, command);
     QFETCH(int, start); QFETCH(int, expected);
-    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor);
     editor.setText(document); handler.setEnabled(true);
     editor.SendScintilla(QsciScintillaBase::SCI_SETEMPTYSELECTION, start);
     editor.SendScintilla(QsciScintillaBase::SCI_EMPTYUNDOBUFFER);
@@ -116,7 +123,7 @@ void TestVimInputHandler::searchNavigation()
 
 void TestVimInputHandler::searchPreviewCancellation()
 {
-    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor);
     editor.setText("foo xx foo yy foo"); handler.setEnabled(true); editor.setCursorPosition(0, 0);
     QTest::keyClicks(&editor, "/");
     auto* prompt = editor.findChild<QLineEdit*>("vimSearchPrompt"); QVERIFY(prompt);
@@ -140,7 +147,7 @@ void TestVimInputHandler::searchPreviewCancellation()
 
 void TestVimInputHandler::searchHistoryAndInvalidPatterns()
 {
-    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor);
     editor.setText("foo bar foo bar"); handler.setEnabled(true); editor.setCursorPosition(0, 0);
     QTest::keyClicks(&editor, "/");
     auto* prompt = editor.findChild<QLineEdit*>("vimSearchPrompt"); QVERIFY(prompt);
@@ -164,7 +171,7 @@ void TestVimInputHandler::searchHistoryAndInvalidPatterns()
 
 void TestVimInputHandler::searchHighlightLifecycle()
 {
-    QsciScintilla editor; prepareEditor(editor);
+    TestEditor editor; prepareEditor(editor);
     const int other = editor.indicatorDefine(QsciScintilla::SquiggleIndicator);
     VimInputHandler handler(&editor);
     editor.setText("foo x foo"); handler.setEnabled(true); editor.setCursorPosition(0, 0);
@@ -189,7 +196,7 @@ void TestVimInputHandler::searchHighlightLifecycle()
 
 void TestVimInputHandler::searchVisualAndTemporaryNormal()
 {
-    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor);
     editor.setText("foo x foo y foo"); handler.setEnabled(true); editor.setCursorPosition(0, 0);
     QTest::keyClicks(&editor, "v/");
     auto* prompt = editor.findChild<QLineEdit*>("vimSearchPrompt"); QVERIFY(prompt);
@@ -214,7 +221,7 @@ void TestVimInputHandler::searchVisualAndTemporaryNormal()
 
 void TestVimInputHandler::searchMacrosAndMappings()
 {
-    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor);
     editor.setText("foo x foo y foo"); handler.setEnabled(true); editor.setCursorPosition(0, 0);
     QTest::keyClicks(&editor, "qa/");
     auto* prompt = editor.findChild<QLineEdit*>("vimSearchPrompt"); QVERIFY(prompt);
@@ -235,7 +242,7 @@ void TestVimInputHandler::searchMacrosAndMappings()
 
 void TestVimInputHandler::nativeFolding()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     prepareEditor(editor);
     editor.setText("outer\r\ninner\r\nbody\r\nend inner\r\nend outer\r\nafter");
@@ -286,7 +293,7 @@ void TestVimInputHandler::nativeFolding()
 
 void TestVimInputHandler::insertIndentation()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     prepareEditor(editor);
     editor.setUtf8(true);
@@ -355,7 +362,7 @@ void TestVimInputHandler::visualRegisterPaste()
     QFETCH(QString, expected);
     QFETCH(int, line);
     QFETCH(int, column);
-    QsciScintilla editor;
+    TestEditor editor;
     editor.setUtf8(true);
     editor.setEolMode(QsciScintilla::EolUnix);
     VimInputHandler handler(&editor);
@@ -413,7 +420,7 @@ void TestVimInputHandler::visualPasteHistory()
     QFETCH(QString, result);
     QFETCH(QString, name);
     QFETCH(QString, contents);
-    QsciScintilla editor;
+    TestEditor editor;
     editor.setEolMode(QsciScintilla::EolUnix);
     VimInputHandler handler(&editor);
     prepareEditor(editor);
@@ -435,7 +442,7 @@ void TestVimInputHandler::visualPasteHistory()
 
 void TestVimInputHandler::visualPasteReadOnly()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     prepareEditor(editor);
     editor.setText("seed");
@@ -460,7 +467,7 @@ void TestVimInputHandler::visualPasteReadOnly()
 
 void TestVimInputHandler::visualPasteRepeatUndo()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     prepareEditor(editor);
     editor.setText("XX");
@@ -481,7 +488,7 @@ void TestVimInputHandler::visualPasteRepeatUndo()
 
 void TestVimInputHandler::visualPasteDefersBlockRegisters()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     prepareEditor(editor);
     editor.setText("abc\ndef");
@@ -499,7 +506,7 @@ void TestVimInputHandler::visualPasteDefersBlockRegisters()
 
 void TestVimInputHandler::changeHistory()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     editor.setUtf8(true);
     prepareEditor(editor);
@@ -566,7 +573,7 @@ void TestVimInputHandler::registerHistories()
     QFETCH(QString, keys);
     QFETCH(QString, name);
     QFETCH(QString, expected);
-    QsciScintilla editor;
+    TestEditor editor;
     editor.setUtf8(true);
     editor.setEolMode(QsciScintilla::EolUnix);
     VimInputHandler handler(&editor);
@@ -587,7 +594,7 @@ void TestVimInputHandler::registerHistories()
 
 void TestVimInputHandler::numberedRegisterRotation()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     editor.setEolMode(QsciScintilla::EolUnix);
     VimInputHandler handler(&editor);
     prepareEditor(editor);
@@ -616,7 +623,7 @@ void TestVimInputHandler::numberedRegisterRotation()
 
 void TestVimInputHandler::registerPasteShapes()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     editor.setEolMode(QsciScintilla::EolWindows);
     VimInputHandler handler(&editor);
     prepareEditor(editor);
@@ -645,7 +652,7 @@ void TestVimInputHandler::registerPasteShapes()
 
 void TestVimInputHandler::blockRegisterHistory()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     prepareEditor(editor);
     editor.setText("abc\ndef");
@@ -675,7 +682,7 @@ void TestVimInputHandler::blockRegisterHistory()
 
 void TestVimInputHandler::insertRegisterClipboardAndCancel()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     editor.setUtf8(true);
     editor.setEolMode(QsciScintilla::EolWindows);
     VimInputHandler handler(&editor);
@@ -708,7 +715,7 @@ void TestVimInputHandler::insertRegisterClipboardAndCancel()
 
 void TestVimInputHandler::insertRegisterCountRepeatUndo()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     prepareEditor(editor);
     editor.setText("foo");
@@ -731,7 +738,7 @@ void TestVimInputHandler::insertRegisterCountRepeatUndo()
 
 void TestVimInputHandler::readOnlyRegisterOperations()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     prepareEditor(editor);
     editor.setText("abc");
@@ -755,7 +762,7 @@ void TestVimInputHandler::readOnlyRegisterOperations()
 
 void TestVimInputHandler::gMotionNavigation()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     editor.setUtf8(true);
     editor.setText("  one  \r\n    two \t\r\n three  \r\nlast\r\n");
@@ -849,7 +856,7 @@ void TestVimInputHandler::gAndFindOperators()
     QFETCH(QString, keys);
     QFETCH(QString, expected);
     QFETCH(bool, insert);
-    QsciScintilla editor;
+    TestEditor editor;
     editor.setUtf8(true);
     editor.setEolMode(input.contains("\r\n") ? QsciScintilla::EolWindows : QsciScintilla::EolUnix);
     VimInputHandler handler(&editor);
@@ -866,7 +873,7 @@ void TestVimInputHandler::gAndFindOperators()
 
 void TestVimInputHandler::visualFindMotions()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     editor.setUtf8(true);
     VimInputHandler handler(&editor);
     editor.setText("ab,cd,ef,gh");
@@ -906,7 +913,7 @@ void TestVimInputHandler::visualFindMotions()
 
 void TestVimInputHandler::findRepeatFailureAndMappings()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     editor.setText("ab,\r\ncd,ef");
     prepareEditor(editor);
@@ -946,7 +953,7 @@ void TestVimInputHandler::findRepeatFailureAndMappings()
 
 void TestVimInputHandler::horizontalPreferredColumn()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     editor.setText("abcd\nx\nwxyz");
     prepareEditor(editor);
@@ -963,7 +970,7 @@ void TestVimInputHandler::horizontalPreferredColumn()
 
 void TestVimInputHandler::lineStartMotions()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     editor.setText("  one\r\n    two\r\n three\r\nlast");
     prepareEditor(editor);
@@ -995,7 +1002,7 @@ void TestVimInputHandler::lineStartMotions()
 
 void TestVimInputHandler::backwardEndOperators()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     editor.setUtf8(true);
     prepareEditor(editor);
@@ -1039,7 +1046,7 @@ void TestVimInputHandler::backwardEndOperators()
 
 void TestVimInputHandler::insertControlDeletion()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     prepareEditor(editor);
     handler.setEnabled(true);
@@ -1075,7 +1082,7 @@ void TestVimInputHandler::insertControlDeletion()
 
 void TestVimInputHandler::insertCompletionCycles()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     const QString original = "apricot apple apple\n\napply apogee";
     editor.setText(original);
@@ -1116,7 +1123,7 @@ void TestVimInputHandler::insertCompletionCycles()
 
 void TestVimInputHandler::insertCompletionUnicodeAndSafety()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     editor.setUtf8(true);
     editor.setText(QString::fromUtf8("測試 測量 測試\r\n測"));
@@ -1153,7 +1160,7 @@ void TestVimInputHandler::insertCompletionUnicodeAndSafety()
 
 void TestVimInputHandler::insertCompletionResets()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     editor.setText("apple apply banana\nap");
     prepareEditor(editor);
@@ -1195,7 +1202,7 @@ void TestVimInputHandler::insertCompletionResets()
 
 void TestVimInputHandler::insertCompletionDotRepeat()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     const QString original = "\napple apply\n\napricot";
     editor.setText(original);
@@ -1231,7 +1238,7 @@ void TestVimInputHandler::insertCompletionDotRepeat()
 
 void TestVimInputHandler::insertCompletionRepeatEdges()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     editor.setUtf8(true);
     editor.setText("\napple\n\napricot");
@@ -1273,7 +1280,7 @@ void TestVimInputHandler::insertCompletionRepeatEdges()
 
 void TestVimInputHandler::insertCompletionMacroIsDynamic()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     editor.setText("\napple\n\napricot");
     prepareEditor(editor);
@@ -1290,7 +1297,7 @@ void TestVimInputHandler::insertCompletionMacroIsDynamic()
 
 void TestVimInputHandler::insertBackspaceAnchors()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     prepareEditor(editor);
     handler.setEnabled(true);
@@ -1337,7 +1344,7 @@ void TestVimInputHandler::insertBackspaceAnchors()
 
 void TestVimInputHandler::replaceBackspacing()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     editor.setUtf8(true);
     prepareEditor(editor);
@@ -1423,7 +1430,7 @@ void TestVimInputHandler::insertOneNormalCommand()
     QFETCH(QString, before);
     QFETCH(QString, command);
     QFETCH(QString, expected);
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     prepareEditor(editor);
     editor.setText(input);
@@ -1442,7 +1449,7 @@ void TestVimInputHandler::insertOneNormalCommand()
 
 void TestVimInputHandler::insertOneNormalPending()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     prepareEditor(editor);
     editor.setText("one two three four five");
@@ -1486,7 +1493,7 @@ void TestVimInputHandler::insertOneNormalPending()
 
 void TestVimInputHandler::insertOneNormalRepeatAndMacros()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     prepareEditor(editor);
     editor.setText("abc def");
@@ -1546,7 +1553,7 @@ void TestVimInputHandler::insertOneNormalRepeatAndMacros()
 
 void TestVimInputHandler::insertOneNormalUndoAndReadOnly()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     prepareEditor(editor);
     editor.setText("abc def");
@@ -1583,7 +1590,7 @@ void TestVimInputHandler::insertOneNormalUndoAndReadOnly()
 
 void TestVimInputHandler::insertOneNormalEx()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     prepareEditor(editor);
     editor.setText("one\ntwo");
@@ -1625,7 +1632,7 @@ void TestVimInputHandler::insertOneNormalSubstitutionConfirmation()
 {
     QFETCH(QString, answers);
     QFETCH(QString, expected);
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     prepareEditor(editor);
     editor.setText("foo foo foo");
@@ -1672,7 +1679,7 @@ void TestVimInputHandler::insertOneNormalSubstitutionConfirmation()
 
 void TestVimInputHandler::insertOneNormalSubstitutionExternalCancellation()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     prepareEditor(editor);
     editor.setText("foo foo");
@@ -1704,7 +1711,7 @@ void TestVimInputHandler::insertOneNormalSubstitutionExternalCancellation()
 
 void TestVimInputHandler::insertAndEscape()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     prepareEditor(editor);
     handler.setEnabled(true);
@@ -1719,7 +1726,7 @@ void TestVimInputHandler::insertAndEscape()
 
 void TestVimInputHandler::insertCtrlWDeletesPreviousWord()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     prepareEditor(editor);
     handler.setEnabled(true);
@@ -1734,7 +1741,7 @@ void TestVimInputHandler::insertCtrlWDeletesPreviousWord()
 
 void TestVimInputHandler::normalMotionsAndDelete()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     editor.setText("one two");
     prepareEditor(editor);
@@ -1749,7 +1756,7 @@ void TestVimInputHandler::normalMotionsAndDelete()
 
 void TestVimInputHandler::wordEndMotionIncludesPunctuationAcrossLines()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     editor.setText("SELECT * \nFROM test;");
     prepareEditor(editor);
@@ -1766,7 +1773,7 @@ void TestVimInputHandler::wordEndMotionIncludesPunctuationAcrossLines()
 
 void TestVimInputHandler::customInsertMappings()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     editor.setText("    SELECT");
     prepareEditor(editor);
@@ -1784,7 +1791,7 @@ void TestVimInputHandler::customInsertMappings()
 
 void TestVimInputHandler::customNormalMappings()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     editor.setText("    SELECT");
     prepareEditor(editor);
@@ -1800,7 +1807,7 @@ void TestVimInputHandler::customNormalMappings()
 
 void TestVimInputHandler::countedLineDelete()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     editor.setText("one\ntwo\nthree\nfour");
     prepareEditor(editor);
@@ -1816,7 +1823,7 @@ void TestVimInputHandler::countedLineDelete()
 
 void TestVimInputHandler::visualDelete()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     editor.setText("abcd");
     prepareEditor(editor);
@@ -1833,7 +1840,7 @@ void TestVimInputHandler::visualDelete()
 
 void TestVimInputHandler::yankAndPasteLine()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     editor.setText("one\ntwo");
     prepareEditor(editor);
@@ -1850,7 +1857,7 @@ void TestVimInputHandler::yankAndPasteLine()
 
 void TestVimInputHandler::undoAndRedo()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     editor.setText("abc");
     prepareEditor(editor);
@@ -1867,7 +1874,7 @@ void TestVimInputHandler::undoAndRedo()
 
 void TestVimInputHandler::operatorMotion()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     editor.setText("one two three");
     prepareEditor(editor);
@@ -1882,7 +1889,7 @@ void TestVimInputHandler::operatorMotion()
 
 void TestVimInputHandler::matchingBraceOperator()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     editor.setText("(value)");
     prepareEditor(editor);
@@ -1897,7 +1904,7 @@ void TestVimInputHandler::matchingBraceOperator()
 
 void TestVimInputHandler::appendAndOpenLines()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     editor.setText("abc");
     prepareEditor(editor);
@@ -1919,7 +1926,7 @@ void TestVimInputHandler::appendAndOpenLines()
 
 void TestVimInputHandler::visualLineDelete()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     editor.setText("one\ntwo\nthree");
     prepareEditor(editor);
@@ -1940,7 +1947,7 @@ void TestVimInputHandler::visualLineDelete()
 
 void TestVimInputHandler::windowsLineEndings()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     editor.setEolMode(QsciScintilla::EolWindows);
     editor.setText("one\r\ntwo");
@@ -1958,7 +1965,7 @@ void TestVimInputHandler::windowsLineEndings()
 
 void TestVimInputHandler::externalClipboardPaste()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     editor.setText("abc");
     prepareEditor(editor);
@@ -1975,7 +1982,7 @@ void TestVimInputHandler::externalClipboardPaste()
 
 void TestVimInputHandler::disabledLeavesEditorUnchanged()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     prepareEditor(editor);
 
@@ -1989,7 +1996,7 @@ QTEST_MAIN(TestVimInputHandler)
 
 void TestVimInputHandler::enhancedMotions()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     editor.setText("  abc.def ghi");
     prepareEditor(editor);
@@ -2013,7 +2020,7 @@ void TestVimInputHandler::enhancedMotions()
 
 void TestVimInputHandler::mappingPrefixAndEscape()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     editor.setText("abcd");
     prepareEditor(editor);
@@ -2081,7 +2088,7 @@ void TestVimInputHandler::paragraphAndSentenceObjects()
     QFETCH(QString, keys);
     QFETCH(QString, expected);
     QFETCH(bool, insert);
-    QsciScintilla editor;
+    TestEditor editor;
     editor.setUtf8(true);
     VimInputHandler handler(&editor);
     editor.setText(input);
@@ -2101,7 +2108,7 @@ void TestVimInputHandler::paragraphAndSentenceObjects()
 
 void TestVimInputHandler::paragraphAndSentenceSelections()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     editor.setUtf8(true);
     VimInputHandler handler(&editor);
     prepareEditor(editor);
@@ -2204,7 +2211,7 @@ void TestVimInputHandler::tagObjects()
     QVERIFY(marker >= 0);
     const int position = markedInput.left(marker).toUtf8().size();
     const QString input = markedInput.remove(marker, 1);
-    QsciScintilla editor;
+    TestEditor editor;
     editor.setUtf8(true);
     VimInputHandler handler(&editor);
     prepareEditor(editor);
@@ -2224,7 +2231,7 @@ void TestVimInputHandler::tagObjects()
 
 void TestVimInputHandler::tagObjectSelectionsAndRegisters()
 {
-    QsciScintilla editor;
+    TestEditor editor;
     editor.setUtf8(true);
     VimInputHandler handler(&editor);
     prepareEditor(editor);
@@ -2326,7 +2333,7 @@ void TestVimInputHandler::textObjects()
     QFETCH(QString, keys);
     QFETCH(QString, expected);
     QFETCH(bool, insert);
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     editor.setText(input);
     prepareEditor(editor);
@@ -2377,7 +2384,7 @@ void TestVimInputHandler::surround()
     QFETCH(QString, keys);
     QFETCH(QString, expected);
     QFETCH(bool, readOnly);
-    QsciScintilla editor;
+    TestEditor editor;
     VimInputHandler handler(&editor);
     editor.setText(input);
     editor.setReadOnly(readOnly);
@@ -2424,7 +2431,7 @@ void TestVimInputHandler::builtinCommands_data()
 void TestVimInputHandler::builtinCommands()
 {
     QFETCH(QString, input); QFETCH(QString, keys); QFETCH(QString, expected);
-    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor);
     editor.setText(input); editor.setCursorPosition(0, 0); handler.setEnabled(true);
     QTest::keyClicks(&editor, keys); QTest::keyClick(&editor, Qt::Key_Escape);
     QCOMPARE(editor.text(), expected);
@@ -2432,7 +2439,7 @@ void TestVimInputHandler::builtinCommands()
 
 void TestVimInputHandler::repeatAndMacro()
 {
-    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor);
     editor.setText("one two three"); editor.setCursorPosition(0, 0); handler.setEnabled(true);
     QTest::keyClicks(&editor, "cwnew"); QTest::keyClick(&editor, Qt::Key_Escape);
     QTest::keyClicks(&editor, "w."); QCOMPARE(editor.text(), QString("new new three"));
@@ -2443,7 +2450,7 @@ void TestVimInputHandler::repeatAndMacro()
 
 void TestVimInputHandler::substitution()
 {
-    QsciScintilla editor; VimInputHandler handler(&editor);
+    TestEditor editor; VimInputHandler handler(&editor);
     editor.setText("foo foo\nFOO bar"); handler.setEnabled(true);
     QVERIFY(handler.executeCommand("%s/foo/test/gi"));
     QCOMPARE(editor.text(), QString("test test\ntest bar"));
@@ -2477,7 +2484,7 @@ void TestVimInputHandler::substitutionConfirmation_data()
 void TestVimInputHandler::substitutionConfirmation()
 {
     QFETCH(QString, command); QFETCH(QString, answers); QFETCH(QString, expected);
-    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor);
     const QString input = "foo foo\r\nfoo foo\r\n";
     editor.setText(input); handler.setEnabled(true);
     editor.SendScintilla(QsciScintillaBase::SCI_EMPTYUNDOBUFFER);
@@ -2504,7 +2511,7 @@ void TestVimInputHandler::substitutionConfirmation()
 
 void TestVimInputHandler::substitutionConfirmationUnicodeAndZeroLength()
 {
-    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor);
     editor.setUtf8(true); handler.setEnabled(true);
     const QString input = QString::fromUtf8("外部\r\n甲乙 甲乙\r\n甲乙\r\n");
     editor.setText(input); editor.setCursorPosition(0, 0);
@@ -2537,7 +2544,7 @@ void TestVimInputHandler::substitutionConfirmationUnicodeAndZeroLength()
 
 void TestVimInputHandler::substitutionConfirmationLifecycle()
 {
-    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor);
     editor.setText("foo foo"); handler.setEnabled(true);
     editor.SendScintilla(QsciScintillaBase::SCI_EMPTYUNDOBUFFER);
     QVERIFY(!handler.executeCommand("%s/absent/bar/gc"));
@@ -2588,7 +2595,7 @@ void TestVimInputHandler::substitutionConfirmationLifecycle()
 
 void TestVimInputHandler::substitutionConfirmationCommandUi()
 {
-    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor);
     editor.setText("foo foo"); handler.setEnabled(true);
     QTest::keyClicks(&editor, ":");
     auto* command = editor.findChild<QLineEdit*>(); QVERIFY(command);
@@ -2626,7 +2633,7 @@ void TestVimInputHandler::exLineCommands_data()
 void TestVimInputHandler::exLineCommands()
 {
     QFETCH(QString, input); QFETCH(QString, command); QFETCH(QString, expected);
-    QsciScintilla editor; VimInputHandler handler(&editor);
+    TestEditor editor; VimInputHandler handler(&editor);
     editor.setUtf8(true); editor.setText(input); editor.setCursorPosition(0, 0); handler.setEnabled(true);
     editor.SendScintilla(QsciScintillaBase::SCI_EMPTYUNDOBUFFER);
     editor.setReadOnly(true);
@@ -2648,7 +2655,7 @@ void TestVimInputHandler::exLineCommands()
 
 void TestVimInputHandler::exRangesAndMarks()
 {
-    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor);
     editor.setEolMode(QsciScintilla::EolWindows);
     editor.setText("one\r\ntwo\r\nthree\r\nfour\r\n");
     handler.setEnabled(true); editor.setCursorPosition(1, 0);
@@ -2679,7 +2686,7 @@ void TestVimInputHandler::exRangesAndMarks()
 
 void TestVimInputHandler::exRejectsInvalidCommands()
 {
-    QsciScintilla editor; VimInputHandler handler(&editor);
+    TestEditor editor; VimInputHandler handler(&editor);
     editor.setText("three\r\ntwo\r\none\r\n"); handler.setEnabled(true);
     editor.setCursorPosition(1, 1);
     editor.SendScintilla(QsciScintillaBase::SCI_EMPTYUNDOBUFFER);
@@ -2704,7 +2711,7 @@ void TestVimInputHandler::exRejectsInvalidCommands()
 
 void TestVimInputHandler::exVisualRange()
 {
-    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor);
     editor.setText("outside\r\nc\r\na\r\nlast\r\n");
     handler.setEnabled(true); editor.setCursorPosition(1, 0);
     QTest::keyClicks(&editor, "Vj:");
@@ -2725,7 +2732,7 @@ void TestVimInputHandler::exVisualRange()
 
 void TestVimInputHandler::blockEditing()
 {
-    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor);
     editor.setText("abc\ndef\nghi"); editor.setCursorPosition(0, 0); handler.setEnabled(true);
     QTest::keyClick(&editor, Qt::Key_V, Qt::ControlModifier);
     QTest::keyClicks(&editor, "jjld"); QCOMPARE(editor.text(), QString("c\nf\ni"));
@@ -2741,7 +2748,7 @@ void TestVimInputHandler::configMappings()
 {
     QTemporaryFile config; QVERIFY(config.open());
     config.write(R"({"leader":",","timeoutMs":300,"shiftWidth":2,"mappings":{"i:jk":"<Esc>","n:Q":"gUw"}})"); config.flush();
-    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor);
     QVERIFY(handler.loadConfig(config.fileName())); handler.setEnabled(true);
     QTest::keyClicks(&editor, "iselectjkQ"); QCOMPARE(editor.text(), QString("selecT"));
     QCOMPARE(handler.mode(), VimInputHandler::Mode::Normal);
@@ -2750,7 +2757,7 @@ void TestVimInputHandler::configMappings()
 
 void TestVimInputHandler::findRepeatAndMarks()
 {
-    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor);
     editor.setText("a,b,c,d\nsecond\nthird"); editor.setCursorPosition(0, 0); handler.setEnabled(true);
     QTest::keyClicks(&editor, "t,;");
     QCOMPARE(int(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS)), 2);
@@ -2763,7 +2770,7 @@ void TestVimInputHandler::findRepeatAndMarks()
 
 void TestVimInputHandler::countedInsert()
 {
-    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor); handler.setEnabled(true);
+    TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor); handler.setEnabled(true);
     QTest::keyClicks(&editor, "3iabc"); QTest::keyClick(&editor, Qt::Key_Escape);
     QCOMPARE(editor.text(), QString("abcabcabc"));
     QTest::keyClicks(&editor, "."); QCOMPARE(editor.text(), QString("abcabcababcabcabcc"));
@@ -2772,7 +2779,7 @@ void TestVimInputHandler::countedInsert()
 
 void TestVimInputHandler::numericAndSqlMappings()
 {
-    QsciScintilla editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor);
     editor.setText("LIMIT 10"); editor.setCursorPosition(0, 0); handler.setEnabled(true);
     QTest::keyClicks(&editor, "2"); QTest::keyClick(&editor, Qt::Key_A, Qt::ControlModifier);
     QCOMPARE(editor.text(), QString("LIMIT 12"));

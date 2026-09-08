@@ -99,7 +99,9 @@ Vimscript、Lua 外掛、LSP、終端機、完整視窗／buffer 管理及外部
 - 已修正搜尋列修飾鍵傳播可能造成的事件遞迴，並覆蓋外部編輯及失去焦點的取消。
 - 本機使用專案附帶 QScintilla 2.14.1 重建：**358 通過、0 失敗、0 跳過**。
 - 新增實際 QObject 父子所有權的編輯器關閉測試，修正搜尋後關閉 SQL 分頁時的釋放順序存取。
-- Windows CTest 納入 Vim 按鍵測試，使用 offscreen 平台；結果由本批 CI 實際驗證。
+- Windows CTest 納入 Vim 按鍵測試，使用 offscreen 平台及明確文字紀錄。
+- 測試 fixture 統一預設 LF，CRLF 案例仍明確指定 Windows 換行；避免依賴執行平台預設。
+- Windows 結果由本批 CI 實際驗證。
 - 尚未提供搜尋位移、d/… 運算子搜尋及 incsearch／hlsearch 設定選項；保留為後續相容性工作。
 
 ## 交付原則
