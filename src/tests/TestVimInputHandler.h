@@ -64,6 +64,10 @@ private slots:
     void builtinCommands_data();
     void builtinCommands();
     void repeatAndMacro();
+    void globalEditing_data();
+    void globalEditing();
+    void globalValidationAndRegisters();
+    void exChangeHistory();
     void exLineEditing_data();
     void exLineEditing();
     void exLineEditingRejectsInvalid();

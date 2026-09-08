@@ -3686,7 +3686,30 @@ void VimInputHandler::promptCommand()
     m_commandLine->show(); m_commandLine->raise(); m_commandLine->setFocus();
 }
 
+void VimInputHandler::recordExChange(int position)
+{
+    position = std::max(0, std::min(position, documentLength()));
+    if(m_changes.isEmpty() || m_changes.last() != position) m_changes.append(position);
+    if(m_changes.size() > 100) m_changes.removeFirst();
+    m_changeIndex = m_changes.size();
+}
+
 bool VimInputHandler::executeCommand(const QString& input)
+{
+    const QByteArray before = m_editor->text().toUtf8();
+    const bool result = executeCommandImpl(input);
+    const QByteArray after = m_editor->text().toUtf8();
+    if(before != after)
+    {
+        int first = 0;
+        while(first < before.size() && first < after.size() && before.at(first) == after.at(first)) ++first;
+        while(first > 0 && first < after.size() && (static_cast<unsigned char>(after.at(first)) & 0xc0) == 0x80) --first;
+        recordExChange(first);
+    }
+    return result;
+}
+
+bool VimInputHandler::executeCommandImpl(const QString& input)
 {
     if(m_substituteActive || m_searchActive) return false;
     QString command = input.trimmed();
@@ -3861,6 +3884,7 @@ bool VimInputHandler::executeCommand(const QString& input)
     const auto sort = QRegularExpression("^sor(?:t)?(!)?(?:\\s+(u))?$").match(command);
     if(sort.hasMatch())
     {
+        if(m_globalActive) return false;
         if(m_editor->isReadOnly()) return false;
         if(!hasRange) { firstLine = 0; lastLine = lineCount - 1; }
         const QByteArray bytes = m_editor->text().toUtf8();
@@ -3898,20 +3922,80 @@ bool VimInputHandler::executeCommand(const QString& input)
     }
     // Delimiters can be escaped. The regular-expression dialect is Qt/PCRE,
     // intentionally documented rather than silently pretending to be Vimscript.
-    if(command.startsWith("g/") || command.startsWith("v/"))
+    const auto global = QRegularExpression("^(global|globa|glob|glo|gl|g|vglobal|vgloba|vglob|vglo|vgl|vg|v)(!?)([^A-Za-z0-9\\s\\\\])(.*)$").match(command);
+    if(global.hasMatch())
     {
-        const int end = command.lastIndexOf('/');
-        if(end <= 1 || command.mid(end+1) != "d" || m_editor->isReadOnly()) return false;
-        QRegularExpression expression(command.mid(2, end-2)); if(!expression.isValid()) return false;
+        if(m_globalActive || command.contains('\n') || command.contains('\r')) return false;
+        const QChar delimiter = global.captured(3).at(0);
+        if(delimiter == '|' || delimiter == '!' || delimiter == '"') return false;
+        const QString tail = global.captured(4);
+        QString pattern; int end = -1;
+        for(int i = 0; i < tail.size(); ++i)
+        {
+            if(tail.at(i) == '\\' && i + 1 < tail.size())
+            {
+                if(tail.at(i+1) != delimiter) pattern += tail.at(i);
+                pattern += tail.at(++i);
+            }
+            else if(tail.at(i) == delimiter) { end = i; break; }
+            else pattern += tail.at(i);
+        }
+        if(end < 0) return false;
+        if(pattern.isEmpty()) pattern = m_lastSearch;
+        if(pattern.isEmpty()) return false;
+        const QRegularExpression expression(pattern);
+        if(!expression.isValid()) return false;
+        const QString operation = tail.mid(end + 1).trimmed();
+        const bool deleting = operation == "d" || operation == "delete";
+        const bool yanking = operation == "y" || operation == "yank";
+        const bool joining = QRegularExpression("^j(?:o(?:i(?:n)?)?)?!?$").match(operation).hasMatch();
+        const bool substituting = operation.startsWith('s') || operation.startsWith('&');
+        if(!deleting && !yanking && !joining && !substituting) return false;
+        if(!yanking && m_editor->isReadOnly()) return false;
+        const QString previousSearch = m_lastSearch;
+        m_lastSearch = pattern;
+        m_globalActive = true;
+        if(substituting)
+        {
+            m_exValidateOnly = true;
+            const bool valid = executeCommandImpl("1" + operation);
+            m_exValidateOnly = false;
+            if(!valid) { m_globalActive = false; m_lastSearch = previousSearch; return false; }
+        }
         if(!hasRange) { firstLine = 0; lastLine = lineCount - 1; }
-        QVector<int> lines;
-        for(int n = firstLine; n <= lastLine; ++n)
-            if(expression.match(m_editor->text(n)).hasMatch() != command.startsWith("v/")) lines.append(n);
-        if(lines.isEmpty()) return false;
+        const bool inverse = global.captured(1).startsWith('v') != !global.captured(2).isEmpty();
+        QVector<int> selected;
+        const QByteArray bytes = m_editor->text().toUtf8();
+        for(int line = firstLine; line <= lastLine; ++line)
+        {
+            const QString row = QString::fromUtf8(bytes.mid(positionFromLine(line), lineEndPosition(line)-positionFromLine(line)));
+            if(expression.match(row).hasMatch() != inverse) selected.append(line);
+        }
+        if(selected.isEmpty()) { m_globalActive = false; return false; }
+        // Snapshot original matching lines. New text is never re-selected, and
+        // a line consumed by join must not be processed a second time.
+        int removed = 0, consumedThrough = -1;
         m_editor->beginUndoAction();
-        m_pendingCommand = "d";
-        for(int i = lines.size()-1; i >= 0; --i) applyLineOperator(lines.at(i), lines.at(i));
-        resetPendingCommand(); m_editor->endUndoAction(); return true;
+        for(int original : selected)
+        {
+            if(original <= consumedThrough) continue;
+            const int line = original - removed;
+            if(joining)
+            {
+                if(original + 1 >= lineCount) continue;
+                setPosition(positionFromLine(line)); joinLines(2, operation.endsWith('!'));
+                consumedThrough = original + 1; ++removed;
+            }
+            else
+            {
+                executeCommandImpl(QString::number(line + 1) + operation);
+                if(deleting) ++removed;
+            }
+        }
+        m_editor->endUndoAction();
+        m_globalActive = false;
+        if(m_searchHighlight) paintSearch(m_lastSearch);
+        return true;
     }
     QStringList parts;
     QString optionText;
@@ -3960,8 +4044,10 @@ bool VimInputHandler::executeCommand(const QString& input)
     }
     const auto options = QRegularExpression("^(&?[gic]*)(?:\\s+([0-9]+))?$").match(optionText);
     if(!options.hasMatch()) return false;
+    if(m_globalActive && !options.captured(2).isEmpty()) return false;
     QString flags = options.captured(1);
     if(flags.startsWith('&')) flags = m_substituteFlags + flags.mid(1);
+    if(m_globalActive && flags.contains('c')) return false;
     if(!options.captured(2).isEmpty())
     {
         bool valid = false;
@@ -3973,6 +4059,7 @@ bool VimInputHandler::executeCommand(const QString& input)
     QRegularExpression expression(parts.at(0), flags.contains('i') ? QRegularExpression::CaseInsensitiveOption : QRegularExpression::NoPatternOption);
     if(!expression.isValid() || m_editor->isReadOnly()) return false;
     if(flags.contains('c') && (!m_enabled || m_mode == Mode::Insert)) return false;
+    if(m_exValidateOnly) return true;
     m_haveSubstitute = true;
     m_substitutePattern = parts.at(0); m_substituteReplacement = parts.at(1); m_substituteFlags = flags;
     m_lastSearch = parts.at(0);
@@ -4052,6 +4139,7 @@ bool VimInputHandler::beginSubstituteConfirmation(const QVector<SubstituteMatch>
         m_substitutePrompt->setReadOnly(true);
         m_substitutePrompt->installEventFilter(this);
     }
+    m_substituteChangeRecorded = false;
     m_substitutePrompt->setGeometry(4, m_editor->height()-32, std::max(60, m_editor->width()-8), 28);
     showSubstituteMatch();
     return true;
@@ -4091,6 +4179,7 @@ bool VimInputHandler::acceptSubstituteMatch()
         setSelection(first, last); m_editor->replaceSelectedText(match.replacement);
         m_substituteChanging = false;
         if(!m_substituteActive) return false;
+        if(!m_substituteChangeRecorded) { recordExChange(first); m_substituteChangeRecorded = true; }
         m_substituteExpected.replace(first, last-first, replacement);
         if(m_editor->text().toUtf8() != m_substituteExpected)
         { finishSubstituteConfirmation(); return false; }

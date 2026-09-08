@@ -164,6 +164,10 @@ private:
     using Strokes = QVector<Stroke>;
     bool processStroke(QKeyEvent* event);
     void promptCommand();
+    bool executeCommandImpl(const QString& command);
+    void recordExChange(int position);
+    bool m_globalActive = false, m_exValidateOnly = false;
+    bool m_substituteChangeRecorded = false;
     struct SubstituteMatch { int first, last; QString replacement; };
     bool beginSubstituteConfirmation(const QVector<SubstituteMatch>& matches);
     bool handleSubstituteConfirmation(QKeyEvent* event);

@@ -2526,6 +2526,84 @@ void TestVimInputHandler::repeatAndMacro()
     QTest::keyClicks(&editor, "qaxjq@a"); QCOMPARE(editor.text(), QString("bc\nef\nghi"));
 }
 
+void TestVimInputHandler::globalEditing_data()
+{
+    QTest::addColumn<QString>("source"); QTest::addColumn<QString>("command"); QTest::addColumn<QString>("expected");
+    QTest::newRow("substitute") << "foo foo\nbar foo\nfoo" << "g/^foo/s/foo/X/g" << "X X\nbar foo\nX";
+    QTest::newRow("full name inverse") << "foo\nbar\nfoo\nbaz" << "vglobal/foo/s/b/B/" << "foo\nBar\nfoo\nBaz";
+    QTest::newRow("bang inverse") << "foo\nbar\nfoo" << "global!/foo/s/bar/X/" << "foo\nX\nfoo";
+    QTest::newRow("range") << "foo\nfoo\nfoo" << "2,3g/foo/s//X/" << "foo\nX\nX";
+    QTest::newRow("escaped delimiter") << "a/b\nother\na/b" << "g/a\\/b/s#/#-#" << "a-b\nother\na-b";
+    QTest::newRow("alternate delimiter") << "foo\nbar\nfoo" << "g#foo#s/foo/X/" << "X\nbar\nX";
+    QTest::newRow("no reselect") << "x\nx" << "g/x/s/x/xx/" << "xx\nxx";
+    QTest::newRow("skip missing substitutions") << "a\nb\na" << "g/./s/a/X/" << "X\nb\nX";
+    QTest::newRow("adjacent joins") << "x\nx\nx\nx\nz" << "g/x/join" << "x x\nx x\nz";
+    QTest::newRow("join outside range") << "x\n y\nz" << "1g/x/join!" << "x y\nz";
+    QTest::newRow("last join") << "a\nx" << "g/x/j" << "a\nx";
+    QTest::newRow("delete forward") << "x\na\nx\nb" << "global/x/delete" << "a\nb";
+    QTest::newRow("delete all") << "x\nx\n" << "g/x/d" << "";
+    QTest::newRow("anchors exclude EOL") << "x\nx\n" << "g/^x$/s/x/X/" << "X\nX\n";
+    QTest::newRow("unicode") << QString::fromUtf8("甲乙\n乙\n甲丙") << QString::fromUtf8("g/甲/s/甲/丁/") << QString::fromUtf8("丁乙\n乙\n丁丙");
+}
+
+void TestVimInputHandler::globalEditing()
+{
+    QFETCH(QString, source); QFETCH(QString, command); QFETCH(QString, expected);
+    for(bool crlf : {false, true})
+    {
+        auto eol = [crlf](QString text) { if(crlf) text.replace("\n", "\r\n"); return text; };
+        TestEditor editor; editor.setUtf8(true); if(crlf) editor.setEolMode(QsciScintilla::EolWindows);
+        VimInputHandler handler(&editor); prepareEditor(editor); handler.setEnabled(true);
+        editor.setText(eol(source)); editor.setCursorPosition(0, 0);
+        editor.SendScintilla(QsciScintillaBase::SCI_EMPTYUNDOBUFFER);
+        editor.setReadOnly(true); QVERIFY(!handler.executeCommand(command)); editor.setReadOnly(false);
+        QVERIFY2(handler.executeCommand(command), qPrintable(command)); QCOMPARE(editor.text(), eol(expected));
+        if(source != expected)
+        { editor.undo(); QCOMPARE(editor.text(), eol(source)); editor.redo(); QCOMPARE(editor.text(), eol(expected)); }
+        else QVERIFY(!editor.SendScintilla(QsciScintillaBase::SCI_CANUNDO));
+    }
+}
+
+void TestVimInputHandler::globalValidationAndRegisters()
+{
+    TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor); handler.setEnabled(true);
+    editor.setText("x1\nkeep\nx2\n"); editor.setCursorPosition(0, 0);
+    editor.SendScintilla(QsciScintillaBase::SCI_EMPTYUNDOBUFFER);
+    QApplication::clipboard()->setText("sentinel");
+    const QStringList invalid = {"g/x/s/x/X/c", "g/x/s/x/X/g 2", "g/x/s/[/X/", "g/x/s/x/X/z",
+        "g/x/sort", "g/x/g/x/d", "g/x/copy $", "g/x/join 2", "g/x/d | d", "g/[ /d", "g/x", "g/x/", "g/x/w"};
+    for(const QString& command : invalid)
+    {
+        QVERIFY2(!handler.executeCommand(command), qPrintable(command));
+        QCOMPARE(editor.text(), QString("x1\nkeep\nx2\n"));
+        QCOMPARE(QApplication::clipboard()->text(), QString("sentinel"));
+        QVERIFY(!editor.SendScintilla(QsciScintillaBase::SCI_CANUNDO));
+    }
+    editor.setReadOnly(true); QVERIFY(handler.executeCommand("g/x/y"));
+    QCOMPARE(QApplication::clipboard()->text(), QString("x2\n"));
+    editor.setReadOnly(false); QVERIFY(handler.executeCommand("g/x/d"));
+    QCOMPARE(QApplication::clipboard()->text(), QString("x2\n"));
+    QCOMPARE(editor.text(), QString("keep\n"));
+}
+
+void TestVimInputHandler::exChangeHistory()
+{
+    TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor); handler.setEnabled(true);
+    editor.setText("one\ntwo\nthree\nfour"); editor.setCursorPosition(0, 0);
+    QVERIFY(handler.executeCommand("2s/two/TWO/"));
+    QVERIFY(handler.executeCommand("4s/four/FOUR/"));
+    QTest::keyClicks(&editor, "ggg;"); QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 14L);
+    QTest::keyClicks(&editor, "g;"); QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 4L);
+    QTest::keyClicks(&editor, "g,"); QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 14L);
+    QVERIFY(handler.executeCommand("g/T/s/T/X/"));
+    QTest::keyClicks(&editor, "Gg;"); QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 4L);
+    QTest::keyClicks(&editor, "g;"); QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 14L);
+    QVERIFY(handler.executeCommand("3s/three/THREE/c"));
+    auto* prompt = editor.findChild<QLineEdit*>("vimSubstituteConfirmation"); QVERIFY(prompt);
+    QTest::keyClicks(prompt, "y"); QTest::keyClicks(&editor, "ggg;");
+    QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 8L);
+}
+
 void TestVimInputHandler::exLineEditing_data()
 {
     QTest::addColumn<QString>("source"); QTest::addColumn<QString>("command"); QTest::addColumn<QString>("expected");
@@ -2945,7 +3023,7 @@ void TestVimInputHandler::exRejectsInvalidCommands()
         "sort n", "sort i", "sort uu", "sort! u garbage", "sort /pattern/", "sort!!",
         "1,2d | sort", "1,2delete extra", "1,2y extra", "1,2!sort", "1,2w",
         "1,2s/two/changed/z", "1,2s/two/changed/g/extra", "1,2s/[/changed/",
-        "1,2s|two|changed|", "1,2global/two/d", "1,2s/two/changed\\"
+        "1,2s|two|changed|", "1,2s/two/changed\\"
     };
     for(const QString& command : commands)
     {
