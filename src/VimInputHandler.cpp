@@ -276,6 +276,14 @@ VimInputHandler::VimInputHandler(QsciScintilla* editor, QObject* parent) :
     m_mappingTimer(new QTimer(this))
 {
     Q_ASSERT(m_editor);
+    // When owned by the editor, QObject deletes this handler after Scintilla's
+    // derived destructor has run. Never send Scintilla messages at that point.
+    connect(m_editor, &QObject::destroyed, this, [this]() {
+        m_editor = nullptr;
+        m_enabled = false;
+        m_searchActive = false;
+        m_substituteActive = false;
+    });
     m_editor->installEventFilter(this);
     m_mappingTimer->setSingleShot(true);
     m_mappingTimer->setInterval(700);
@@ -365,6 +373,15 @@ VimInputHandler::Mode VimInputHandler::mode() const
 
 bool VimInputHandler::eventFilter(QObject* watched, QEvent* event)
 {
+    // QWidget teardown can send FocusOut before QObject::destroyed, after the
+    // Scintilla subobject is already gone. Its runtime metaobject reveals this.
+    if(m_editor && !qobject_cast<QsciScintilla*>(static_cast<QObject*>(m_editor)))
+    {
+        m_editor = nullptr;
+        m_enabled = false;
+        m_searchActive = false;
+        m_substituteActive = false;
+    }
     if(m_searchActive)
     {
         if(watched == m_editor && event->type() == QEvent::KeyPress)

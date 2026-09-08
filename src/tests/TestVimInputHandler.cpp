@@ -11,6 +11,7 @@
 #include <QKeyEvent>
 #include <QLineEdit>
 #include <QAction>
+#include <QPointer>
 
 namespace
 {
@@ -19,6 +20,24 @@ void prepareEditor(QsciScintilla& editor)
     editor.resize(640, 320);
     QCoreApplication::processEvents();
 }
+}
+
+void TestVimInputHandler::searchEditorDestruction()
+{
+    for(bool active : {false, true})
+    {
+        auto* editor = new QsciScintilla;
+        QPointer<VimInputHandler> handler = new VimInputHandler(editor, editor);
+        editor->show();
+        editor->setText("foo x foo"); handler->setEnabled(true); editor->setCursorPosition(0, 0);
+        QTest::keyClicks(editor, "/");
+        auto* prompt = editor->findChild<QLineEdit*>("vimSearchPrompt"); QVERIFY(prompt);
+        prompt->setText("foo");
+        QCoreApplication::processEvents();
+        if(!active) QTest::keyClick(prompt, Qt::Key_Return);
+        delete editor;
+        QVERIFY(handler.isNull());
+    }
 }
 
 void TestVimInputHandler::searchFoldAndJumpRestoration()
