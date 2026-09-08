@@ -231,6 +231,8 @@ private:
     bool m_visualTagSelected = false;
     QString m_registerText;
     bool m_registerLinewise;
+    bool m_haveSubstitute = false;
+    QString m_substitutePattern, m_substituteReplacement, m_substituteFlags;
     QString m_lastSearch;
     bool m_lastSearchForward;
     QString m_mappingPrefix;

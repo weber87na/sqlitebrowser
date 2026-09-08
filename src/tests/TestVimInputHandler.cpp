@@ -2526,6 +2526,176 @@ void TestVimInputHandler::repeatAndMacro()
     QTest::keyClicks(&editor, "qaxjq@a"); QCOMPARE(editor.text(), QString("bc\nef\nghi"));
 }
 
+void TestVimInputHandler::exLineEditing_data()
+{
+    QTest::addColumn<QString>("source"); QTest::addColumn<QString>("command"); QTest::addColumn<QString>("expected");
+    QTest::newRow("copy after last") << "a\nb\nc" << "1,2copy $" << "a\nb\nc\na\nb";
+    QTest::newRow("copy before first") << "a\nb\nc" << "2,3co0" << "b\nc\na\nb\nc";
+    QTest::newRow("copy inside source") << "a\nb\nc" << "1,2t1" << "a\na\nb\nb\nc";
+    QTest::newRow("copy final EOL") << "a\nb\n" << "2copy 0" << "b\na\nb\n";
+    QTest::newRow("copy duplicate tail") << "a\na" << "1copy $" << "a\na\na";
+    QTest::newRow("copy blank line") << "a\n\nb" << "2copy $" << "a\n\nb\n";
+    QTest::newRow("move down") << "a\nb\nc\nd" << "1,2move $" << "c\nd\na\nb";
+    QTest::newRow("move up") << "a\nb\nc\nd" << "3,4m0" << "c\nd\na\nb";
+    QTest::newRow("move middle") << "a\nb\nc\nd" << "2m3" << "a\nc\nb\nd";
+    QTest::newRow("move terminated") << "a\nb\nc\n" << "1m$" << "b\nc\na\n";
+    QTest::newRow("move self end") << "a\nb\nc" << "1,2m2" << "a\nb\nc";
+    QTest::newRow("move adjacent") << "a\nb\nc" << "2,3m1" << "a\nb\nc";
+    QTest::newRow("relative destination") << "a\nb\nc" << "1copy .+1" << "a\nb\na\nc";
+    QTest::newRow("semicolon destination") << "a\nb\nc\nd" << "2;3copy ." << "a\nb\nb\nc\nc\nd";
+    QTest::newRow("marked destination") << "a\nb\nc" << "3t'a" << "a\nc\nb\nc";
+    QTest::newRow("unicode move") << QString::fromUtf8("甲\n乙\n丙") << "1m$" << QString::fromUtf8("乙\n丙\n甲");
+    QTest::newRow("default join") << "a\n  b\nc" << "join" << "a b\nc";
+    QTest::newRow("join range") << "a\n  b\n\tc\nd" << "1,3j" << "a b c\nd";
+    QTest::newRow("raw join") << "a \n  b\nc" << "1,3join!" << "a   bc";
+    QTest::newRow("join count") << "a\nb\nc\nd" << "1,2join 2" << "a\nb c\nd";
+    QTest::newRow("single address join") << "a\nb\nc" << "2j" << "a\nb c";
+    QTest::newRow("last address join") << "a\nb\nc" << "$j" << "a\nb\nc";
+    QTest::newRow("join identical range") << "a\nb\nc" << "2,2j" << "a\nb\nc";
+    QTest::newRow("join one count") << "a\nb" << "j 1" << "a\nb";
+    QTest::newRow("join preserves EOL") << "a\nb\n" << "%join" << "a b\n";
+    QTest::newRow("join closing parenthesis") << "a\n )\nb" << "j" << "a)\nb";
+}
+
+void TestVimInputHandler::exLineEditing()
+{
+    QFETCH(QString, source); QFETCH(QString, command); QFETCH(QString, expected);
+    for(bool crlf : {false, true})
+    {
+        auto eol = [crlf](QString text) { if(crlf) text.replace("\n", "\r\n"); return text; };
+        TestEditor editor; editor.setUtf8(true); if(crlf) editor.setEolMode(QsciScintilla::EolWindows);
+        VimInputHandler handler(&editor); prepareEditor(editor);
+        editor.setText(eol(source)); editor.setCursorPosition(0, 0); handler.setEnabled(true);
+        QTest::keyClicks(&editor, "ma");
+        editor.SendScintilla(QsciScintillaBase::SCI_EMPTYUNDOBUFFER);
+        QApplication::clipboard()->setText("register sentinel");
+        editor.setReadOnly(true); QVERIFY(!handler.executeCommand(command));
+        QCOMPARE(editor.text(), eol(source)); editor.setReadOnly(false);
+        QVERIFY2(handler.executeCommand(command), qPrintable(command));
+        QCOMPARE(editor.text(), eol(expected));
+        QCOMPARE(QApplication::clipboard()->text(), QString("register sentinel"));
+        if(source != expected)
+        {
+            editor.undo(); QCOMPARE(editor.text(), eol(source));
+            editor.redo(); QCOMPARE(editor.text(), eol(expected));
+        }
+        else QVERIFY(!editor.SendScintilla(QsciScintillaBase::SCI_CANUNDO));
+    }
+}
+
+void TestVimInputHandler::exLineEditingRejectsInvalid()
+{
+    TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    editor.setText("a\nb\nc"); editor.setCursorPosition(1, 0); handler.setEnabled(true);
+    editor.SendScintilla(QsciScintillaBase::SCI_EMPTYUNDOBUFFER);
+    const QStringList commands = {"copy", "copy 4", "copy -3", "copy 1,2", "copy 0 garbage", "copy 0 | d",
+        "copy 999999999999999999999", "move 'z", "1,3move 2", "0copy 1", "3,1move 0", "copy! 1",
+        "join 0", "join 999999999999999999999", "join -1", "join 9", "join!!", "join garbage"};
+    for(const QString& command : commands)
+    {
+        QVERIFY2(!handler.executeCommand(command), qPrintable(command));
+        QCOMPARE(editor.text(), QString("a\nb\nc"));
+        QCOMPARE(editor.SendScintilla(QsciScintillaBase::SCI_GETCURRENTPOS), 2L);
+        QVERIFY(!editor.SendScintilla(QsciScintillaBase::SCI_CANUNDO));
+    }
+}
+
+void TestVimInputHandler::exSubstituteRepeat_data()
+{
+    QTest::addColumn<QString>("command"); QTest::addColumn<QString>("expected");
+    QTest::newRow("bare substitute") << "s" << "X foo FOO\nfoo foo FOO\nfoo";
+    QTest::newRow("full name") << "substitute" << "X foo FOO\nfoo foo FOO\nfoo";
+    QTest::newRow("ampersand") << "&" << "X foo FOO\nfoo foo FOO\nfoo";
+    QTest::newRow("keep flags") << "&&" << "X X X\nfoo foo FOO\nfoo";
+    QTest::newRow("override flags") << "&g" << "X X FOO\nfoo foo FOO\nfoo";
+    QTest::newRow("spaced flags") << "s g" << "X X FOO\nfoo foo FOO\nfoo";
+    QTest::newRow("count") << "& 2" << "X foo FOO\nX foo FOO\nfoo";
+    QTest::newRow("range count") << "1,2&& 2" << "foo foo FOO\nX X X\nX";
+    QTest::newRow("whole buffer") << "%&&" << "X X X\nX X X\nX";
+    QTest::newRow("empty pattern") << "s//Y/" << "Y foo FOO\nfoo foo FOO\nfoo";
+    QTest::newRow("reuse flags explicit") << "s/foo/Y/&" << "Y Y Y\nfoo foo FOO\nfoo";
+}
+
+void TestVimInputHandler::exSubstituteRepeat()
+{
+    QFETCH(QString, command); QFETCH(QString, expected);
+    for(bool crlf : {false, true})
+    {
+        auto eol = [crlf](QString text) { if(crlf) text.replace("\n", "\r\n"); return text; };
+        TestEditor editor; if(crlf) editor.setEolMode(QsciScintilla::EolWindows);
+        VimInputHandler handler(&editor); prepareEditor(editor); handler.setEnabled(true);
+        editor.setText("foo"); editor.setCursorPosition(0, 0);
+        QVERIFY(handler.executeCommand("s/foo/X/gi"));
+        const QString source = eol("foo foo FOO\nfoo foo FOO\nfoo");
+        editor.setText(source); editor.setCursorPosition(0, 0);
+        QVERIFY2(handler.executeCommand(command), qPrintable(command));
+        QCOMPARE(editor.text(), eol(expected)); editor.undo(); QCOMPARE(editor.text(), source);
+    }
+}
+
+void TestVimInputHandler::exCommandUiAndSearchReuse()
+{
+    TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor); handler.setEnabled(true);
+    editor.setText("foo"); editor.setCursorPosition(0, 0);
+    QVERIFY(handler.executeCommand("s/foo/X/"));
+    editor.setText("bar bar"); editor.setCursorPosition(0, 0);
+    QTest::keyClicks(&editor, "/");
+    auto* search = editor.findChild<QLineEdit*>("vimSearchPrompt"); QVERIFY(search);
+    search->setText("bar"); QTest::keyClick(search, Qt::Key_Return);
+    QVERIFY(handler.executeCommand("s//Y/g")); QCOMPARE(editor.text(), QString("Y Y"));
+    editor.setText("a\nb\nc"); editor.setCursorPosition(0, 0);
+    QTest::keyClicks(&editor, "Vj:");
+    QLineEdit* command = nullptr;
+    for(auto* input : editor.findChildren<QLineEdit*>())
+        if(input->text() == "'<,'>") command = input;
+    QVERIFY(command); command->setText("'<,'>copy $"); QTest::keyClick(command, Qt::Key_Return);
+    QCOMPARE(editor.text(), QString("a\nb\nc\na\nb")); QVERIFY(command->isHidden());
+    editor.undo(); QCOMPARE(editor.text(), QString("a\nb\nc"));
+    editor.setCursorPosition(0, 0); QTest::keyClicks(&editor, "i");
+    QTest::keyClick(&editor, Qt::Key_O, Qt::ControlModifier); QTest::keyClicks(&editor, ":");
+    command->setText("1move $"); QTest::keyClick(command, Qt::Key_Return);
+    QCOMPARE(editor.text(), QString("b\nc\na")); QCOMPARE(handler.mode(), VimInputHandler::Mode::Insert);
+    QTest::keyClick(&editor, Qt::Key_Escape); QTest::keyClicks(&editor, "u");
+    QCOMPARE(editor.text(), QString("a\nb\nc"));
+}
+
+void TestVimInputHandler::exSubstituteHistoryValidation()
+{
+    TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor); handler.setEnabled(true);
+    editor.setText("foo"); editor.setCursorPosition(0, 0);
+    QVERIFY(!handler.executeCommand("&")); QVERIFY(!handler.executeCommand("s//X/"));
+    QVERIFY(handler.executeCommand("s/foo/X/g"));
+    const QStringList invalid = {"s/[/bad/", "s/foo/bad/z", "&z", "&& 0", "s/foo/bad/g 0", "& 999999999999999999999"};
+    for(const QString& command : invalid) QVERIFY(!handler.executeCommand(command));
+    editor.setReadOnly(true); QVERIFY(!handler.executeCommand("s/X/bad/")); editor.setReadOnly(false);
+    editor.setText("foo foo"); editor.setCursorPosition(0, 0);
+    QVERIFY(handler.executeCommand("&&")); QCOMPARE(editor.text(), QString("X X"));
+    editor.setText("bar bar"); editor.setCursorPosition(0, 0);
+    QVERIFY(!handler.executeCommand("s/absent/Y/g")); // A valid no-match command still defines history.
+    editor.setText("absent absent"); editor.setCursorPosition(0, 0);
+    QVERIFY(handler.executeCommand("&&")); QCOMPARE(editor.text(), QString("Y Y"));
+    editor.setText("a&"); editor.setCursorPosition(0, 0);
+    QVERIFY(handler.executeCommand("s/(a&)/\\1-\\&/")); QCOMPARE(editor.text(), QString("a&-&"));
+    editor.setText("a"); editor.setCursorPosition(0, 0);
+    QVERIFY(handler.executeCommand("s&a&\\&&")); QCOMPARE(editor.text(), QString("&"));
+    editor.setText("a"); editor.setCursorPosition(0, 0);
+    QVERIFY(handler.executeCommand("&")); QCOMPARE(editor.text(), QString("&"));
+}
+
+void TestVimInputHandler::exSubstituteRepeatConfirmationAndKeys()
+{
+    TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor); handler.setEnabled(true);
+    editor.setText("foo foo\nfoo foo"); editor.setCursorPosition(0, 0);
+    QVERIFY(handler.executeCommand("s/foo/X/gc"));
+    auto* prompt = editor.findChild<QLineEdit*>("vimSubstituteConfirmation");
+    QVERIFY(prompt); QTest::keyClicks(prompt, "a");
+    editor.setCursorPosition(1, 0); QVERIFY(handler.executeCommand("&&"));
+    QTest::keyClicks(prompt, "ny"); QCOMPARE(editor.text(), QString("X X\nfoo X"));
+    editor.undo(); QCOMPARE(editor.text(), QString("X X\nfoo foo"));
+    QTest::keyClicks(&editor, "&"); QCOMPARE(editor.text(), QString("X X\nX foo"));
+    QTest::keyClicks(&editor, "u"); QCOMPARE(editor.text(), QString("X X\nfoo foo"));
+}
+
 void TestVimInputHandler::substitution()
 {
     TestEditor editor; VimInputHandler handler(&editor);

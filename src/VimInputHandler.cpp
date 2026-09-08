@@ -1394,6 +1394,12 @@ bool VimInputHandler::handleNormalKey(QKeyEvent* event)
         clampNormalCaret();
         return true;
     }
+    if(key == "&")
+    {
+        const int count = takeCount();
+        executeCommand("& " + QString::number(count));
+        return true;
+    }
     if(key == "J")
     {
         joinLines(takeCount());
@@ -3698,12 +3704,13 @@ bool VimInputHandler::executeCommand(const QString& input)
     if(lineCount > 1 && positionFromLine(lineCount - 1) == documentLength()) --lineCount;
     const int cursorLine = std::min(currentLine(), lineCount - 1);
     int firstLine = cursorLine, lastLine = cursorLine;
-    bool hasRange = false;
+    bool hasRange = false, rangePair = false;
     int offset = 0;
     const auto skipSpace = [&]() {
         while(offset < command.size() && command.at(offset).isSpace()) ++offset;
     };
-    const auto parseAddress = [&](int relativeLine, int& result) {
+    int addressCurrent = cursorLine;
+    const auto parseAddress = [&](int relativeLine, int& result, bool allowZero) {
         skipSpace();
         if(offset == command.size()) return false;
         qint64 value = relativeLine;
@@ -3714,7 +3721,7 @@ bool VimInputHandler::executeCommand(const QString& input)
             while(offset < command.size() && command.at(offset).isDigit()) ++offset;
             bool valid = false;
             value = command.mid(start, offset - start).toLongLong(&valid);
-            if(!valid || value < 1 || value > std::numeric_limits<int>::max()) return false;
+            if(!valid || value < (allowZero ? 0 : 1) || value > std::numeric_limits<int>::max()) return false;
             --value;
         }
         else if(initial == '.') ++offset;
@@ -3746,23 +3753,25 @@ bool VimInputHandler::executeCommand(const QString& input)
             if(value < -qint64(std::numeric_limits<int>::max()) || value > std::numeric_limits<int>::max()) return false;
             skipSpace();
         }
-        if(value < 0 || value >= lineCount) return false;
+        if(value < (allowZero ? -1 : 0) || value >= lineCount) return false;
         result = int(value);
         return true;
     };
     if(command.startsWith('%'))
     {
-        firstLine = 0; lastLine = lineCount - 1; hasRange = true; ++offset;
+        firstLine = 0; lastLine = lineCount - 1; hasRange = true; rangePair = true; ++offset;
     }
     else if(!command.isEmpty() && (command.at(0).isDigit() || QString(".$'+-").contains(command.at(0))))
     {
         hasRange = true;
-        if(!parseAddress(cursorLine, firstLine)) return false;
+        if(!parseAddress(cursorLine, firstLine, false)) return false;
         lastLine = firstLine;
         if(offset < command.size() && (command.at(offset) == ',' || command.at(offset) == ';'))
         {
+            rangePair = true;
             const bool relativeToFirst = command.at(offset++) == ';';
-            if(!parseAddress(relativeToFirst ? firstLine : cursorLine, lastLine)) return false;
+            if(relativeToFirst) addressCurrent = firstLine;
+            if(!parseAddress(addressCurrent, lastLine, false)) return false;
         }
     }
     if(lastLine < firstLine) return false;
@@ -3778,6 +3787,75 @@ bool VimInputHandler::executeCommand(const QString& input)
         m_pendingCommand = command.left(1);
         applyLineOperator(firstLine, lastLine);
         resetPendingCommand();
+        return true;
+    }
+    const auto transfer = QRegularExpression("^(co(?:p(?:y)?)?|t|m(?:o(?:v(?:e)?)?)?)(?=$|[^A-Za-z])(.*)$").match(command);
+    if(transfer.hasMatch())
+    {
+        if(m_editor->isReadOnly()) return false;
+        const bool moving = transfer.captured(1).startsWith('m');
+        command = transfer.captured(2); offset = 0;
+        int destination = 0;
+        if(!parseAddress(addressCurrent, destination, true)) return false;
+        skipSpace(); if(offset != command.size()) return false;
+        if(moving && destination >= firstLine && destination < lastLine) return false;
+        const int size = lastLine - firstLine + 1;
+        if(moving && (destination == lastLine || destination == firstLine - 1)) return true;
+        const QByteArray bytes = m_editor->text().toUtf8();
+        QStringList original;
+        for(int line = 0; line < lineCount; ++line)
+            original.append(QString::fromUtf8(bytes.mid(positionFromLine(line), lineEndPosition(line) - positionFromLine(line))));
+        QStringList rows = original;
+        const QStringList selected = original.mid(firstLine, size);
+        int insertion = destination + 1;
+        if(moving)
+        {
+            for(int i = 0; i < size; ++i) rows.removeAt(firstLine);
+            if(destination > lastLine) insertion -= size;
+        }
+        for(int i = 0; i < size; ++i) rows.insert(insertion + i, selected.at(i));
+        // Replace only the affected line interval; preserve the rest of the
+        // document and its final-EOL presence. Registers are not involved.
+        int prefix = 0, suffix = 0;
+        while(prefix < original.size() && prefix < rows.size() && original.at(prefix) == rows.at(prefix)) ++prefix;
+        while(suffix < original.size() - prefix && suffix < rows.size() - prefix &&
+              original.at(original.size()-1-suffix) == rows.at(rows.size()-1-suffix)) ++suffix;
+        if(prefix != original.size() || prefix != rows.size())
+        {
+            const bool finalEol = lineEndPosition(lineCount - 1) < documentLength();
+            int first = prefix < lineCount ? positionFromLine(prefix) : documentLength();
+            const int last = suffix ? positionFromLine(lineCount - suffix) : documentLength();
+            QString replacement = rows.mid(prefix, rows.size()-prefix-suffix).join(endOfLine());
+            if(suffix || finalEol) replacement += endOfLine();
+            if(prefix == lineCount && !finalEol) replacement.prepend(endOfLine());
+            m_editor->beginUndoAction();
+            setSelection(first, last); m_editor->replaceSelectedText(replacement);
+            m_editor->endUndoAction();
+        }
+        setPosition(positionFromLine(insertion + size - 1)); move("^", 1);
+        return true;
+    }
+    const auto join = QRegularExpression("^j(?:o(?:i(?:n)?)?)?(!)?(?:\\s+([0-9]+))?$").match(command);
+    if(join.hasMatch())
+    {
+        if(m_editor->isReadOnly()) return false;
+        if(!join.captured(2).isEmpty())
+        {
+            bool valid = false;
+            const qint64 count = join.captured(2).toLongLong(&valid);
+            if(!valid || count < 1 || count > std::numeric_limits<int>::max()) return false;
+            firstLine = lastLine;
+            if(qint64(firstLine) + count > lineCount) return false;
+            lastLine = firstLine + int(count) - 1;
+        }
+        else if(!rangePair)
+        {
+            if(!hasRange && firstLine + 1 >= lineCount) return false;
+            lastLine = std::min(firstLine + 1, lineCount - 1);
+        }
+        if(lastLine == firstLine) return true;
+        setPosition(positionFromLine(firstLine));
+        joinLines(lastLine - firstLine + 1, !join.captured(1).isEmpty());
         return true;
     }
     const auto sort = QRegularExpression("^sor(?:t)?(!)?(?:\\s+(u))?$").match(command);
@@ -3835,27 +3913,55 @@ bool VimInputHandler::executeCommand(const QString& input)
         for(int i = lines.size()-1; i >= 0; --i) applyLineOperator(lines.at(i), lines.at(i));
         resetPendingCommand(); m_editor->endUndoAction(); return true;
     }
-    if(!command.startsWith('s') || command.size() < 2) return false;
-    const QChar delimiter = command.at(1);
-    if(delimiter.isLetterOrNumber() || delimiter.isSpace() || delimiter == '\\' || delimiter == '|') return false;
-    QStringList parts; QString part;
-    for(int i = 2; i < command.size(); ++i)
+    QStringList parts;
+    QString optionText;
+    const auto repeat = QRegularExpression("^(?:substitute|substitut|substitu|substit|substi|subst|subs|sub|su|s|&)\\s*([&gic]*)(?:\\s+([0-9]+))?$").match(command);
+    // Bare :s and :& repeat the pattern/replacement, not the old flags.
+    if(repeat.hasMatch())
     {
-        if(command.at(i) == '\\')
-        {
-            if(i+1 == command.size()) return false;
-            if(command.at(i+1) == delimiter) part += delimiter;
-            else { part += command.at(i); part += command.at(i+1); }
-            ++i;
-        }
-        else if(command.at(i) == delimiter) { parts << part; part.clear(); }
-        else part += command.at(i);
+        if(!m_haveSubstitute) return false;
+        parts << m_substitutePattern << m_substituteReplacement;
+        optionText = repeat.captured(1);
+        if(!repeat.captured(2).isEmpty()) optionText += " " + repeat.captured(2);
     }
-    parts << part; if(parts.size() < 2 || parts.size() > 3) return false;
-    const auto options = QRegularExpression("^([gic]*)(?:\\s+([0-9]+))?$")
-        .match(parts.size() == 3 ? parts.at(2) : QString());
+    else
+    {
+        const auto name = QRegularExpression("^(substitute|substitut|substitu|substit|substi|subst|subs|sub|su|s)").match(command);
+        if(!name.hasMatch()) return false;
+        command = "s" + command.mid(name.capturedLength());
+        if(command.size() < 2) return false;
+        const QChar delimiter = command.at(1);
+        if(delimiter.isLetterOrNumber() || delimiter.isSpace() || delimiter == '\\' || delimiter == '|') return false;
+        QString part;
+        for(int i = 2; i < command.size(); ++i)
+        {
+            if(command.at(i) == '\\')
+            {
+                if(i+1 == command.size()) return false;
+                if(command.at(i+1) == delimiter)
+                {
+                    if(parts.size() == 1 && delimiter == '&') part += command.at(i);
+                    part += delimiter;
+                }
+                else { part += command.at(i); part += command.at(i+1); }
+                ++i;
+            }
+            else if(command.at(i) == delimiter) { parts << part; part.clear(); }
+            else part += command.at(i);
+        }
+        parts << part;
+        if(parts.size() < 2 || parts.size() > 3) return false;
+        optionText = parts.size() == 3 ? parts.at(2) : QString();
+        if(parts.at(0).isEmpty())
+        {
+            if(m_lastSearch.isEmpty()) return false;
+            parts[0] = m_lastSearch;
+        }
+    }
+    const auto options = QRegularExpression("^(&?[gic]*)(?:\\s+([0-9]+))?$").match(optionText);
     if(!options.hasMatch()) return false;
-    const QString flags = options.captured(1);
+    QString flags = options.captured(1);
+    if(flags.startsWith('&')) flags = m_substituteFlags + flags.mid(1);
     if(!options.captured(2).isEmpty())
     {
         bool valid = false;
@@ -3866,11 +3972,29 @@ bool VimInputHandler::executeCommand(const QString& input)
     }
     QRegularExpression expression(parts.at(0), flags.contains('i') ? QRegularExpression::CaseInsensitiveOption : QRegularExpression::NoPatternOption);
     if(!expression.isValid() || m_editor->isReadOnly()) return false;
+    if(flags.contains('c') && (!m_enabled || m_mode == Mode::Insert)) return false;
+    m_haveSubstitute = true;
+    m_substitutePattern = parts.at(0); m_substituteReplacement = parts.at(1); m_substituteFlags = flags;
+    m_lastSearch = parts.at(0);
+    if(m_searchHighlight) paintSearch(m_lastSearch);
     const auto replacementFor = [&parts](const QRegularExpressionMatch& match) {
-        QString replacement = parts.at(1);
-        for(int group = std::min(9, match.lastCapturedIndex()); group >= 1; --group)
-            replacement.replace("\\" + QString::number(group), match.captured(group));
-        replacement.replace("&", match.captured());
+        QString replacement;
+        const QString pattern = parts.at(1);
+        // Interpret the template once: captured text is literal, even if it
+        // contains '&' or backslashes that resemble another backreference.
+        for(int i = 0; i < pattern.size(); ++i)
+        {
+            const QChar c = pattern.at(i);
+            if(c == '&') replacement += match.captured();
+            else if(c == '\\' && i + 1 < pattern.size())
+            {
+                const QChar next = pattern.at(++i);
+                if(next >= '0' && next <= '9') replacement += match.captured(next.digitValue());
+                else if(next == '&' || next == '\\') replacement += next;
+                else { replacement += c; replacement += next; }
+            }
+            else replacement += c;
+        }
         return replacement;
     };
     if(flags.contains('c'))

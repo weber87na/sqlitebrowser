@@ -64,6 +64,14 @@ private slots:
     void builtinCommands_data();
     void builtinCommands();
     void repeatAndMacro();
+    void exLineEditing_data();
+    void exLineEditing();
+    void exLineEditingRejectsInvalid();
+    void exSubstituteRepeat_data();
+    void exSubstituteRepeat();
+    void exSubstituteHistoryValidation();
+    void exCommandUiAndSearchReuse();
+    void exSubstituteRepeatConfirmationAndKeys();
     void substitution();
     void substitutionConfirmation_data();
     void substitutionConfirmation();
