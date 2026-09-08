@@ -116,6 +116,8 @@ private:
     QString endOfLine() const;
     void setRegister(const QString& text, bool linewise, bool yank = false, bool blockwise = false);
     QString registerText(const QString& name, bool& linewise, bool& blockwise) const;
+    QString blockRow(int line, int left, int right, const QString& value, bool replace);
+    void insertBlock(int line, int column, const QStringList& rows, int count);
     void paste(bool before, int count);
     void pasteVisual(bool preserveRegisters, int count);
 

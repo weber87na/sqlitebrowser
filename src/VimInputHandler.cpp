@@ -1247,7 +1247,9 @@ bool VimInputHandler::handleControlKey(QKeyEvent* event)
     }
     case Qt::Key_V:
         if(m_mode == Mode::VisualBlock) { setMode(Mode::Normal); setPosition(m_visualCaret); }
-        else { m_visualAnchor = currentPosition(); m_visualCaret = currentPosition(); setMode(Mode::VisualBlock); updateVisualSelection(); }
+        else { m_visualAnchor = currentPosition(); m_visualCaret = currentPosition();
+            m_editor->SendScintilla(QsciScintillaBase::SCI_CHOOSECARETX);
+            setMode(Mode::VisualBlock); updateVisualSelection(); }
         return true;
     case Qt::Key_O:
     case Qt::Key_I:
@@ -1533,8 +1535,6 @@ bool VimInputHandler::handleVisualKey(QKeyEvent* event)
     { finishBlockOperator(key == "x" ? "d" : key); return true; }
     if(key == "p" || key == "P")
     {
-        if(m_mode == Mode::VisualBlock)
-        { m_selectedRegister.clear(); resetPendingCommand(); return true; }
         pasteVisual(key == "P", takeCount());
         return true;
     }
@@ -2800,6 +2800,57 @@ QString VimInputHandler::registerText(const QString& name, bool& linewise, bool&
     return value;
 }
 
+// Work in Scintilla columns, splitting a tab only where a rectangle cuts it.
+// Return a padded row so a copied short line retains the rectangle's width.
+QString VimInputHandler::blockRow(int line, int left, int right, const QString& value, bool replace)
+{
+    const int first = int(m_editor->SendScintilla(QsciScintillaBase::SCI_FINDCOLUMN, line, left));
+    int last = first;
+    int column = int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETCOLUMN, first));
+    const int initialColumn = column;
+    const int lineStart = positionFromLine(line);
+    const QByteArray bytes = m_editor->text(line).toUtf8();
+    QString removed;
+    while(last < lineEndPosition(line) && column < right)
+    {
+        const int next = positionAfter(last);
+        const int nextColumn = int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETCOLUMN, next));
+        if(bytes.at(last - lineStart) == '\t')
+            removed += QString(std::max(0, std::min(right, nextColumn) - std::max(left, column)), ' ');
+        else if(column >= left)
+            removed += QString::fromUtf8(bytes.mid(last - lineStart, next - last));
+        last = next;
+        column = nextColumn;
+    }
+    removed += QString(std::max(0, right - std::max(left, column)), ' ');
+    if(replace)
+    {
+        // Insertion inside a tab must split it even for a zero-width range.
+        if(first == last && initialColumn < left && first < lineEndPosition(line))
+        {
+            last = positionAfter(first);
+            column = int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETCOLUMN, last));
+        }
+        const bool touchesText = last > first;
+        const QString prefix(std::max(0, left - initialColumn), ' ');
+        const QString suffix(std::max(0, column - right), ' ');
+        setSelection(first, last);
+        m_editor->replaceSelectedText((touchesText || !value.isEmpty() ? prefix : QString()) + value + suffix);
+    }
+    return removed;
+}
+
+void VimInputHandler::insertBlock(int line, int column, const QStringList& rows, int count)
+{
+    for(int i = 0; i < rows.size(); ++i)
+    {
+        while(line + i >= m_editor->lines())
+        { setPosition(documentLength()); m_editor->replaceSelectedText(endOfLine()); }
+        blockRow(line + i, column, column, rows.at(i).repeated(std::max(1, count)), true);
+    }
+    setPosition(int(m_editor->SendScintilla(QsciScintillaBase::SCI_FINDCOLUMN, line, column)));
+}
+
 void VimInputHandler::paste(bool before, int count)
 {
     const QString selected = m_selectedRegister;
@@ -2811,17 +2862,12 @@ void VimInputHandler::paste(bool before, int count)
 
     if(blockwise && !linewise)
     {
-        const QStringList rows = value.split('\n');
-        int line = currentLine(), column = int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETCOLUMN, currentPosition()));
-        if(!before) ++column;
-        for(int i = 0; i < rows.size(); ++i)
-        {
-            while(line+i >= m_editor->lines()) { setPosition(documentLength()); m_editor->replaceSelectedText(endOfLine()); }
-            int pos = int(m_editor->SendScintilla(QsciScintillaBase::SCI_FINDCOLUMN, line+i, column));
-            int actual = int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETCOLUMN, pos));
-            setPosition(pos); m_editor->replaceSelectedText(QString(std::max(0, column-actual), ' ') + rows.at(i).repeated(count));
-        }
-        setPosition(int(m_editor->SendScintilla(QsciScintillaBase::SCI_FINDCOLUMN, line, column))); return;
+        const int line = currentLine();
+        const int position = !before && currentPosition() < lineEndPosition(line)
+            ? positionAfter(currentPosition()) : currentPosition();
+        const int column = int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETCOLUMN, position));
+        insertBlock(line, column, value.split('\n'), count);
+        return;
     }
     value = value.repeated(std::max(1, count));
     int insertionPosition = currentPosition();
@@ -2888,8 +2934,43 @@ void VimInputHandler::pasteVisual(bool preserveRegisters, int count)
     // Read before recording the replaced selection: it may overwrite the source
     // unnamed, numbered, small-delete, or clipboard register.
     QString value = registerText(selected, linewise, blockwise);
-    // Preserve the selection until column-aware block replacement is available.
-    if(blockwise) return;
+    if(m_mode == Mode::VisualBlock)
+    {
+        const int anchorLine = int(m_editor->SendScintilla(QsciScintillaBase::SCI_LINEFROMPOSITION, m_visualAnchor));
+        const int caretLine = int(m_editor->SendScintilla(QsciScintillaBase::SCI_LINEFROMPOSITION, m_visualCaret));
+        const int anchorColumn = int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETCOLUMN, m_visualAnchor));
+        const int caretColumn = int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETCOLUMN, m_visualCaret));
+        const int firstLine = std::min(anchorLine, caretLine), lastLine = std::max(anchorLine, caretLine);
+        const int left = std::min(anchorColumn, caretColumn);
+        const int endpoint = anchorColumn > caretColumn ? m_visualAnchor : m_visualCaret;
+        const int right = std::max(std::max(anchorColumn, caretColumn) + 1,
+            int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETCOLUMN, positionAfter(endpoint))));
+        QStringList removed;
+        setMode(Mode::Normal);
+        for(int line = lastLine; line >= firstLine; --line)
+            removed.prepend(blockRow(line, left, right, QString(), true));
+        if(!preserveRegisters) setRegister(removed.join('\n'), false, false, true);
+        value.replace("\r\n", "\n"); value.replace('\r', '\n');
+        if(blockwise)
+            insertBlock(firstLine, left, value.split('\n'), count);
+        else if(!linewise && !value.contains('\n'))
+        {
+            QStringList rows;
+            for(int line = firstLine; line <= lastLine; ++line) rows.append(value);
+            insertBlock(firstLine, left, rows, count);
+        }
+        else
+        {
+            const int position = linewise ? positionFromLine(firstLine) :
+                int(m_editor->SendScintilla(QsciScintillaBase::SCI_FINDCOLUMN, firstLine, left));
+            setPosition(position);
+            value.replace("\n", endOfLine());
+            m_editor->replaceSelectedText(value.repeated(std::max(1, count)));
+            setPosition(position);
+        }
+        clampNormalCaret();
+        return;
+    }
 
     const bool wholeLines = m_mode == Mode::VisualLine;
     const int first = int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETSELECTIONSTART));
@@ -2902,6 +2983,29 @@ void VimInputHandler::pasteVisual(bool preserveRegisters, int count)
     // Visual p writes deletion history, whereas modern Vim's P leaves all
     // registers untouched. The selected register is the source, never a target.
     if(!preserveRegisters) setRegister(replaced, wholeLines);
+
+    if(blockwise)
+    {
+        const int line = int(m_editor->SendScintilla(QsciScintillaBase::SCI_LINEFROMPOSITION, first));
+        const int column = int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETCOLUMN, first));
+        QStringList rows = value.split('\n');
+        if(wholeLines)
+        {
+            for(QString& row : rows) row = row.repeated(std::max(1, count));
+            QString replacement = rows.join(endOfLine());
+            if(last < documentLength() || document.endsWith(endOfLine())) replacement += endOfLine();
+            m_editor->replaceSelectedText(replacement);
+            setMode(Mode::Normal); setPosition(first);
+        }
+        else
+        {
+            m_editor->replaceSelectedText(QString());
+            setMode(Mode::Normal);
+            insertBlock(line, column, rows, count);
+        }
+        clampNormalCaret();
+        return;
+    }
 
     value.replace("\r\n", "\n");
     value.replace('\r', '\n');
@@ -3929,21 +4033,17 @@ void VimInputHandler::finishBlockOperator(const QString& command)
     const int caretColumn = int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETCOLUMN, m_visualCaret));
     m_blockFirst = std::min(anchorLine, caretLine); m_blockLast = std::max(anchorLine, caretLine);
     m_blockColumn = std::min(anchorColumn, caretColumn);
-    const int lastColumn = std::max(anchorColumn, caretColumn)+1;
+    const int endpoint = anchorColumn > caretColumn ? m_visualAnchor : m_visualCaret;
+    const int lastColumn = std::max(std::max(anchorColumn, caretColumn) + 1,
+        int(m_editor->SendScintilla(QsciScintillaBase::SCI_GETCOLUMN, positionAfter(endpoint))));
     QStringList rows;
-    QVector<QPair<int,int>> ranges;
-    const QByteArray bytes = m_editor->text().toUtf8();
     for(int line = m_blockFirst; line <= m_blockLast; ++line)
-    {
-        int first = int(m_editor->SendScintilla(QsciScintillaBase::SCI_FINDCOLUMN, line, m_blockColumn));
-        int last = int(m_editor->SendScintilla(QsciScintillaBase::SCI_FINDCOLUMN, line, lastColumn));
-        ranges.append(qMakePair(first, last)); rows.append(QString::fromUtf8(bytes.mid(first, last-first)));
-    }
+        rows.append(blockRow(line, m_blockColumn, lastColumn, QString(), false));
     setMode(Mode::Normal);
     if(command != "I" && command != "A") setRegister(rows.join('\n'), false, command == "y", true);
     if((command == "d" || command == "c") && !m_editor->isReadOnly())
-        for(int i = ranges.size()-1; i >= 0; --i)
-        { setSelection(ranges.at(i).first, ranges.at(i).second); m_editor->replaceSelectedText(QString()); }
+        for(int line = m_blockLast; line >= m_blockFirst; --line)
+            blockRow(line, m_blockColumn, lastColumn, QString(), true);
     if(command == "A") m_blockColumn = lastColumn;
     setPosition(int(m_editor->SendScintilla(QsciScintillaBase::SCI_FINDCOLUMN, m_blockFirst, m_blockColumn)));
     if((command == "I" || command == "A" || command == "c") && !m_editor->isReadOnly())

@@ -486,22 +486,100 @@ void TestVimInputHandler::visualPasteRepeatUndo()
     QCOMPARE(editor.text(), QString("one two three"));
 }
 
-void TestVimInputHandler::visualPasteDefersBlockRegisters()
+void TestVimInputHandler::visualBlockPaste_data()
 {
-    TestEditor editor;
-    VimInputHandler handler(&editor);
-    prepareEditor(editor);
-    editor.setText("abc\ndef");
-    editor.setCursorPosition(0, 0);
-    handler.setEnabled(true);
+    QTest::addColumn<QString>("source");
+    QTest::addColumn<QString>("prepare");
+    QTest::addColumn<QString>("target");
+    QTest::addColumn<QString>("keys");
+    QTest::addColumn<QString>("expected");
+    const QString block(QChar(22));
+    QTest::newRow("block to character") << "abc\ndef" << block + "jl\"ay" << "old tail" << "viw\"aP" << "ab tail\nde";
+    QTest::newRow("block to line") << "abc\ndef" << block + "jl\"ay" << "old\nlast" << "V\"aP" << "ab\nde\nlast";
+    QTest::newRow("block to final line") << "abc\ndef" << block + "jl\"ay" << "old" << "V\"aP" << "ab\nde";
+    QTest::newRow("block count to line") << "abc\ndef" << block + "jl\"ay" << "old\nlast" << "V\"a2P" << "abab\ndede\nlast";
+    QTest::newRow("block to rectangle") << "abc\ndef" << block + "jl\"ay" << "old tail\nnew tail" << block + "jl\"aP" << "abd tail\ndew tail";
+    QTest::newRow("block count") << "abc\ndef" << block + "jl\"ay" << "old\nnew" << block + "jl\"a2P" << "ababd\ndedew";
+    QTest::newRow("tall selection") << "abc\ndef" << block + "jl\"ay" << "old\nnew\nend" << block + "2jl\"aP" << "abd\ndew\nd";
+    QTest::newRow("tall source") << "abc\ndef" << block + "jl\"ay" << "old" << block + "l\"aP" << "abd\nde";
+    QTest::newRow("character broadcasts") << "XX" << "\"ayiw" << "old\nnew" << block + "jl\"aP" << "XXd\nXXw";
+    QTest::newRow("character count") << "X" << "\"ayiw" << "old\nnew" << block + "jl\"a3P" << "XXXd\nXXXw";
+    QTest::newRow("multiline character") << "XYabc\nZ abc" << "vjl\"ay" << "abc def\nghi jkl" << block + "jl\"aP" << "XYabc\nZ c def\ni jkl";
+    QTest::newRow("line source") << "XX\nYY" << "Vj\"ay" << "old\nnew" << block + "jl\"aP" << "XX\nYY\nd\nw";
+    QTest::newRow("short target") << "XX" << "\"ayiw" << "abcd\nx\nabcdef" << "2l" + block + "2jl\"aP" << "abXX\nx XX\nabXXef";
+    QTest::newRow("tab boundary") << "XX" << "\"ayiw" << "abcd\n\tZ\nabcdef" << "l" + block + "2jl\"aP" << "aXXd\n XX Z\naXXdef";
+    QTest::newRow("reverse selection") << "XX" << "\"ayiw" << "old\nnew" << "jl" + block + "kh\"aP" << "XXd\nXXw";
+    QTest::newRow("short source retains width") << "abcd\nx\nabcdef" << "2l" + block + "2jl\"ay" << "123\n456\n789" << block + "jl\"a2P" << "cdcd3\n    6\ncdcd789";
+    QTest::newRow("unicode") << QString::fromUtf8("中文\n文字") << block + "j\"ay" << QString::fromUtf8("甲乙丙\n丁戊己") << block + "j\"aP" << QString::fromUtf8("中乙丙\n文戊己");
+    QTest::newRow("blackhole") << "X" << "yiw" << "old\nnew" << block + "jl\"_p" << "d\nw";
+}
+
+void TestVimInputHandler::visualBlockPaste()
+{
+    QFETCH(QString, source); QFETCH(QString, prepare); QFETCH(QString, target);
+    QFETCH(QString, keys); QFETCH(QString, expected);
+    for(bool crlf : {false, true})
+    {
+        TestEditor editor; editor.setUtf8(true); editor.setTabWidth(4);
+        VimInputHandler handler(&editor); prepareEditor(editor);
+        if(crlf) editor.setEolMode(QsciScintilla::EolWindows);
+        auto eol = [crlf](QString text) { if(crlf) text.replace("\n", "\r\n"); return text; };
+        auto type = [&editor](const QString& text) {
+            for(QChar key : text)
+                if(key.unicode() == 22) QTest::keyClick(&editor, Qt::Key_V, Qt::ControlModifier);
+                else QTest::keyClicks(&editor, QString(key));
+        };
+        editor.setText(eol(source)); editor.setCursorPosition(0, 0); handler.setEnabled(true);
+        type(prepare);
+        editor.setText(eol(target)); editor.setCursorPosition(0, 0);
+        type(keys);
+        QCOMPARE(editor.text(), eol(expected));
+        QCOMPARE(handler.mode(), VimInputHandler::Mode::Normal);
+        QTest::keyClicks(&editor, "u");
+        QCOMPARE(editor.text(), eol(target));
+        QTest::keyClick(&editor, Qt::Key_R, Qt::ControlModifier);
+        QCOMPARE(editor.text(), eol(expected));
+    }
+}
+
+void TestVimInputHandler::visualBlockPasteRepeatReadOnly()
+{
+    TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor);
+    editor.setText("X"); editor.setCursorPosition(0, 0); handler.setEnabled(true);
+    QTest::keyClicks(&editor, "\"ayiw");
+    editor.setText("old\nnew\nend\nlast"); editor.setCursorPosition(0, 0);
     QTest::keyClick(&editor, Qt::Key_V, Qt::ControlModifier);
-    QTest::keyClicks(&editor, "jl\"ay");
-    editor.setText("old tail");
-    editor.setCursorPosition(0, 0);
-    QTest::keyClicks(&editor, "viw\"ap");
-    QCOMPARE(editor.text(), QString("old tail"));
-    QCOMPARE(handler.mode(), VimInputHandler::Mode::Visual);
-    QCOMPARE(editor.selectedText(), QString("old"));
+    QTest::keyClicks(&editor, "jl\"aP");
+    QCOMPARE(editor.text(), QString("Xd\nXw\nend\nlast"));
+    QTest::keyClicks(&editor, "2j0.");
+    QCOMPARE(editor.text(), QString("Xd\nXw\nXd\nXst"));
+    QTest::keyClicks(&editor, "u");
+    QCOMPARE(editor.text(), QString("Xd\nXw\nend\nlast"));
+    editor.setReadOnly(true); editor.setCursorPosition(0, 0);
+    QTest::keyClick(&editor, Qt::Key_V, Qt::ControlModifier);
+    QTest::keyClicks(&editor, "jl\"a3p");
+    QCOMPARE(editor.text(), QString("Xd\nXw\nend\nlast"));
+    QCOMPARE(handler.mode(), VimInputHandler::Mode::Normal);
+    QCOMPARE(QApplication::clipboard()->text(), QString("X"));
+    editor.setReadOnly(false); editor.setText("abc"); editor.setCursorPosition(0, 0);
+    QTest::keyClicks(&editor, "P");
+    QCOMPARE(editor.text(), QString("Xabc"));
+}
+
+void TestVimInputHandler::visualBlockPasteHistory()
+{
+    for(bool preserve : {false, true})
+    {
+        TestEditor editor; VimInputHandler handler(&editor); prepareEditor(editor);
+        editor.setText("XX"); editor.setCursorPosition(0, 0); handler.setEnabled(true);
+        QTest::keyClicks(&editor, "\"ayiw");
+        editor.setText("old\nnew"); editor.setCursorPosition(0, 0);
+        QTest::keyClick(&editor, Qt::Key_V, Qt::ControlModifier);
+        QTest::keyClicks(&editor, preserve ? "jl\"aP" : "jl\"ap");
+        editor.setText("123\n456"); editor.setCursorPosition(0, 0);
+        QTest::keyClicks(&editor, "P");
+        QCOMPARE(editor.text(), preserve ? QString("XX123\n456") : QString("ol123\nne456"));
+    }
 }
 
 void TestVimInputHandler::changeHistory()

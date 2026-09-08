@@ -26,7 +26,10 @@ private slots:
     void visualPasteHistory();
     void visualPasteReadOnly();
     void visualPasteRepeatUndo();
-    void visualPasteDefersBlockRegisters();
+    void visualBlockPaste_data();
+    void visualBlockPaste();
+    void visualBlockPasteHistory();
+    void visualBlockPasteRepeatReadOnly();
     void gMotionNavigation();
     void gAndFindOperators_data();
     void gAndFindOperators();
